@@ -16,6 +16,16 @@
         <p id="state-display">State: Stopped</p>
         <button id="start-stop-btn">START</button>
 
+        <div id="instrument-toggles">
+            <button class="toggle-btn active" data-inst="kick">KICK</button>
+            <button class="toggle-btn active" data-inst="bass">BASS</button>
+            <button class="toggle-btn active" data-inst="lead">SYNTH</button>
+            <button class="toggle-btn active" data-inst="chords">CHORDS</button>
+            <button class="toggle-btn active" data-inst="piano">PIANO</button>
+            <button class="toggle-btn active" data-inst="pads">PADS</button>
+            <button class="toggle-btn active" data-inst="arp">ARP</button>
+        </div>
+
         <div id="controls">
             <div class="control-group">
                 <label>Acid Cutoff</label>
@@ -62,6 +72,7 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let chordSynth, pianoSynth, padSynth, arpSynth;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
         let analyser, fftAnalyser, canvas, ctx, animationId, meter;
@@ -75,6 +86,17 @@
         let midiAccess = null;
         let midiOut = null;
         let midiIn = null;
+
+        // Toggle states
+        let enabledInstruments = {
+            kick: true,
+            bass: true,
+            lead: true,
+            chords: true,
+            piano: true,
+            pads: true,
+            arp: true
+        };
 
         function logCode(line) {
             const container = document.getElementById('code-log');
@@ -198,6 +220,34 @@
 
             leadFilter.connect(leadDelay);
             leadDelay.connect(leadReverb);
+
+            // Chord Synth
+            chordSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 }
+            }).connect(sidechainGain);
+            chordSynth.volume.value = -10;
+
+            // Piano Synth (Stylized)
+            pianoSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 }
+            }).connect(masterComp);
+            pianoSynth.volume.value = -5;
+
+            // Pad Synth
+            padSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "triangle" },
+                envelope: { attack: 2, decay: 1, sustain: 0.8, release: 2 }
+            }).connect(sidechainGain);
+            padSynth.volume.value = -15;
+
+            // Arp Synth
+            arpSynth = new Tone.FMSynth({
+                oscillator: { type: "square" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
+            }).connect(sidechainGain);
+            arpSynth.volume.value = -12;
 
             // Noise Sampler (Replacement for NoiseSynth)
             // Procedurally generate a noise buffer
@@ -506,6 +556,34 @@
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
+            socket.on('trigger_chords', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                chordSynth.triggerAttackRelease(data.notes, data.duration, now + lookAhead);
+                logCode(`  play_chord [:${data.notes.join(', :')}], release: 1`);
+            });
+
+            socket.on('trigger_piano', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                pianoSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, synth: :piano`);
+            });
+
+            socket.on('trigger_pads', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                padSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, release: 4, synth: :hollow`);
+            });
+
+            socket.on('trigger_arp', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                arpSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, synth: :arp`);
+            });
+
             socket.on('param_update', (data) => {
                 if (data.param === 'lead_cutoff') {
                     // Clamp between 400Hz and 9000Hz
@@ -627,6 +705,34 @@
                 if (ui.style.display === 'none') {
                     ui.style.display = 'block';
                 }
+            });
+
+            // Instrument Toggles
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const inst = btn.getAttribute('data-inst');
+                    enabledInstruments[inst] = !enabledInstruments[inst];
+                    btn.classList.toggle('active', enabledInstruments[inst]);
+
+                    // Update Mute State
+                    const synths = {
+                        kick: [kickSynth],
+                        bass: [bassSynth],
+                        lead: [leadSynth],
+                        chords: [chordSynth],
+                        piano: [pianoSynth],
+                        pads: [padSynth],
+                        arp: [arpSynth]
+                    };
+
+                    if (synths[inst]) {
+                        synths[inst].forEach(s => {
+                            if (s) s.volume.mute = !enabledInstruments[inst];
+                        });
+                    }
+
+                    logCode(`# Instrument ${inst.toUpperCase()} ${enabledInstruments[inst] ? 'ENABLED' : 'DISABLED'}`);
+                });
             });
         }
 
