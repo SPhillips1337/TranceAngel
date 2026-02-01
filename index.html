@@ -23,6 +23,7 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let noiseSynth, snareSynth;
         let analyser, canvas, ctx, animationId;
 
         function setupAudio() {
@@ -62,6 +63,17 @@
                 envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 },
                 filterEnvelope: { attack: 0.001, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
             }).connect(leadFilter);
+
+            // FX
+            noiseSynth = new Tone.NoiseSynth({
+                noise: { type: "white" },
+                envelope: { attack: 4, decay: 0.2, sustain: 0.5, release: 2 }
+            }).toDestination();
+
+            snareSynth = new Tone.NoiseSynth({
+                noise: { type: "white" },
+                envelope: { attack: 0.001, decay: 0.1, sustain: 0 }
+            }).toDestination();
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
@@ -129,9 +141,30 @@
                 leadSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
             });
 
+            socket.on('trigger_riser', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                noiseSynth.triggerAttack(now + lookAhead);
+                // Release after duration in bars
+                const durationSeconds = (60 / 140) * 4 * data.duration;
+                noiseSynth.triggerRelease(now + lookAhead + durationSeconds);
+            });
+
+            socket.on('trigger_snare', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                snareSynth.triggerAttackRelease(data.duration, now + lookAhead);
+            });
+
             socket.on('param_update', (data) => {
                 if (data.param === 'lead_cutoff') {
                     leadFilter.frequency.rampTo(data.value, 0.1);
+                } else if (data.param === 'bass_spread') {
+                    if (bassSynth) {
+                        bassSynth.set({
+                            oscillator: { spread: data.value }
+                        });
+                    }
                 }
             });
 

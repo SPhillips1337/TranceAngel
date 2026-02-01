@@ -49,6 +49,7 @@ class Sequencer:
         self.play_kick()
         self.play_bass()
         self.play_lead()
+        self.play_fx()
         self.update_params()
 
         # Increment counts
@@ -91,6 +92,22 @@ class Sequencer:
             detune = (random.random() - 0.5) * 20
             socketio.emit('trigger_lead', {'note': note, 'duration': '16n', 'detune': detune})
 
+    def play_fx(self):
+        if self.state == "Build-up":
+            # Riser start every 8 bars
+            if self.sixteenth_count == 0 and self.bar_count % 8 == 0:
+                socketio.emit('trigger_riser', {'duration': 8})
+
+            # Snare roll
+            phase_pos = self.bar_count % 32
+            snare_prob = 0
+            if phase_pos > 16: snare_prob = 0.3
+            if phase_pos > 24: snare_prob = 0.6
+            if phase_pos > 28: snare_prob = 1.0
+
+            if self.sixteenth_count % 2 == 0 and random.random() < snare_prob:
+                 socketio.emit('trigger_snare', {'duration': '16n'})
+
     def update_params(self):
         # Evolve filter
         cutoff = 1000
@@ -104,6 +121,10 @@ class Sequencer:
             cutoff = 3000
 
         socketio.emit('param_update', {'param': 'lead_cutoff', 'value': cutoff})
+
+        # Chaos factor for bass
+        spread = 20 + random.random() * 20
+        socketio.emit('param_update', {'param': 'bass_spread', 'value': spread})
 
 sequencer = Sequencer()
 
@@ -122,6 +143,8 @@ def handle_connect():
 def handle_start():
     print('Starting music')
     sequencer.start()
+    # Sync client state
+    emit('state_change', {'state': sequencer.state, 'bar': sequencer.bar_count})
 
 @socketio.on('stop_music')
 def handle_stop():
