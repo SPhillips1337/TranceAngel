@@ -44,10 +44,15 @@
                 <label>Load Pattern (MIDI JSON)</label>
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
             </div>
+            <div class="control-group">
+                <button id="reset-btn">Reset Settings</button>
+                <button id="hide-ui-btn">Hide UI</button>
+            </div>
         </div>
     </div>
     <canvas id="matrix-bg"></canvas>
     <canvas id="visualizer"></canvas>
+    <canvas id="histogram"></canvas>
 
     <script>
         let socket;
@@ -58,7 +63,8 @@
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
-        let analyser, canvas, ctx, animationId, meter;
+        let analyser, fftAnalyser, canvas, ctx, animationId, meter;
+        let histCanvas, histCtx;
 
         // Matrix components
         let matrixCanvas, matrixCtx, matrixDrops = [], matrixHue = 120; // 120 is Hacker Green
@@ -210,6 +216,9 @@
             analyser = new Tone.Analyser("waveform", 1024);
             Tone.Destination.connect(analyser);
 
+            fftAnalyser = new Tone.Analyser("fft", 256);
+            Tone.Destination.connect(fftAnalyser);
+
             setupVisualizer();
             setupMatrix();
         }
@@ -262,17 +271,27 @@
         function setupVisualizer() {
             canvas = document.getElementById("visualizer");
             ctx = canvas.getContext("2d");
+
+            histCanvas = document.getElementById("histogram");
+            histCtx = histCanvas.getContext("2d");
+
             window.addEventListener("resize", () => {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
+                histCanvas.width = window.innerWidth;
+                histCanvas.height = window.innerHeight;
             });
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+            histCanvas.width = window.innerWidth;
+            histCanvas.height = window.innerHeight;
             draw();
         }
 
         function draw() {
             animationId = requestAnimationFrame(draw);
+
+            // Waveform Visualizer
             const buffer = analyser.getValue();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
@@ -285,6 +304,22 @@
                 else ctx.lineTo(x, y);
             }
             ctx.stroke();
+
+            // Histogram (FFT)
+            if (fftAnalyser) {
+                const fftData = fftAnalyser.getValue();
+                histCtx.clearRect(0, 0, histCanvas.width, histCanvas.height);
+                const barWidth = (histCanvas.width / fftData.length) * 2.5;
+                let x = 0;
+
+                for (let i = 0; i < fftData.length; i++) {
+                    // FFT data is in dB, typically -100 to 0
+                    const barHeight = (fftData[i] + 100) * (histCanvas.height / 100);
+                    histCtx.fillStyle = "#00ffcc";
+                    histCtx.fillRect(x, histCanvas.height - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+            }
         }
 
         function triggerSidechain(time) {
@@ -534,6 +569,39 @@
             document.getElementById('reverb-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value) / 100;
                 if (leadReverb) leadReverb.wet.rampTo(val, 0.1);
+            });
+
+            document.getElementById('reset-btn').addEventListener('click', () => {
+                // Reset Sliders
+                document.getElementById('cutoff-slider').value = 1000;
+                document.getElementById('width-slider').value = 20;
+                document.getElementById('reverb-slider').value = 30;
+
+                // Reset Audio Params
+                if (leadFilter) leadFilter.frequency.rampTo(1000, 0.1);
+                if (bassSynth && bassSynth.voices) {
+                    bassSynth.voices.forEach(voice => {
+                        if (voice.oscillator && voice.oscillator.spread) {
+                            voice.oscillator.spread.rampTo(20, 0.1);
+                        }
+                    });
+                }
+                if (leadReverb) leadReverb.wet.rampTo(0.3, 0.1);
+
+                // Reset Pattern on Backend
+                if (socket) socket.emit('reset_pattern');
+            });
+
+            document.getElementById('hide-ui-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('ui-container').style.display = 'none';
+            });
+
+            window.addEventListener('click', () => {
+                const ui = document.getElementById('ui-container');
+                if (ui.style.display === 'none') {
+                    ui.style.display = 'block';
+                }
             });
         }
 

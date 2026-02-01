@@ -177,5 +177,10 @@ def handle_update_pattern(pattern):
     print('Pattern updated')
     sequencer.pattern = pattern
 
+@socketio.on('reset_pattern')
+def handle_reset_pattern():
+    print('Pattern reset')
+    sequencer.pattern = None
+
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)
