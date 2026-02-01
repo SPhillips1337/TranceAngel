@@ -29,12 +29,20 @@
         function setupAudio() {
             // Master Output Chain (Soft Clipping)
             const limiter = new Tone.Limiter(-1).toDestination();
+
+            // Master De-Hisser (Highshelf filter to tilt down high end)
+            const deHisser = new Tone.Filter({
+                type: "highshelf",
+                frequency: 8000,
+                gain: -6
+            }).connect(limiter);
+
             const compressor = new Tone.Compressor({
                 threshold: -20,
                 ratio: 3,
                 attack: 0.01,
                 release: 0.25
-            }).connect(limiter);
+            }).connect(deHisser);
 
             // Sidechain effect node
             sidechainGain = new Tone.Gain(1).connect(compressor);
@@ -45,32 +53,32 @@
                 octaves: 10,
                 oscillator: { type: "sine" },
                 envelope: {
-                    attack: 0.001,
+                    attack: 0.02, // Zero-crossing smoothing
                     decay: 0.4,
                     sustain: 0.01,
-                    release: 1.4, // Minimum 0.1s
+                    release: 1.4,
                     attackCurve: "exponential"
                 }
             }).connect(compressor);
 
-            // Bass Synth (SuperSaw)
+            // Bass Synth (SuperSaw) - sawtooth6 to limit harmonics
             bassSynth = new Tone.PolySynth(Tone.MonoSynth, {
-                oscillator: { type: "fatsawtooth", count: 3, spread: 25 },
-                envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.4 },
-                filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.1, baseFrequency: 100, octaves: 2.5 }
+                oscillator: { type: "fatsawtooth6", count: 3, spread: 20 },
+                envelope: { attack: 0.02, decay: 0.1, sustain: 0.4, release: 0.4 },
+                filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 100, octaves: 2.5 }
             }).connect(sidechainGain);
 
             // Lead Synth (Acid)
             leadFilter = new Tone.Filter({
                 frequency: 1000,
                 type: "lowpass",
-                resonance: 8 // Max 10
+                resonance: 8
             }).connect(sidechainGain);
 
             leadSynth = new Tone.MonoSynth({
-                oscillator: { type: "sawtooth" },
-                envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 },
-                filterEnvelope: { attack: 0.001, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
+                oscillator: { type: "sawtooth6" },
+                envelope: { attack: 0.02, decay: 0.2, sustain: 0.2, release: 0.5 },
+                filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
             }).connect(leadFilter);
 
             // FX
@@ -81,13 +89,11 @@
 
             snareSynth = new Tone.NoiseSynth({
                 noise: { type: "white" },
-                envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+                envelope: { attack: 0.02, decay: 0.1, sustain: 0, release: 0.1 }
             }).connect(compressor);
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
-            // Connect to analyser before limiter to see true peak?
-            // Usually we want to see what the user hears.
             Tone.Destination.connect(analyser);
 
             setupVisualizer();
@@ -149,8 +155,20 @@
             socket.on('trigger_lead', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
-                leadSynth.detune.setValueAtTime(data.detune, now + lookAhead);
-                leadSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                const time = now + lookAhead;
+
+                // Harmonic Tracking (Key Follow): Base Cutoff = Note Frequency * 3
+                const freq = Tone.Frequency(data.note).toFrequency();
+                const baseCutoff = freq * 3;
+
+                // Resonance Safety (Q-Limit): Lower Q as frequency increases
+                const currentQ = Math.max(1, 15 - (baseCutoff / 1000));
+
+                leadFilter.frequency.setValueAtTime(baseCutoff, time);
+                leadFilter.Q.setValueAtTime(currentQ, time);
+
+                leadSynth.detune.setValueAtTime(data.detune, time);
+                leadSynth.triggerAttackRelease(data.note, data.duration, time);
             });
 
             socket.on('trigger_riser', (data) => {
@@ -172,7 +190,12 @@
                 if (data.param === 'lead_cutoff') {
                     // Clamp between 400Hz and 9000Hz
                     const clampedVal = Math.max(400, Math.min(9000, data.value));
+
+                    // Resonance Safety applied during sweeps too
+                    const currentQ = Math.max(1, 15 - (clampedVal / 1000));
+
                     leadFilter.frequency.rampTo(clampedVal, 0.05);
+                    leadFilter.Q.rampTo(currentQ, 0.05);
                 } else if (data.param === 'bass_spread') {
                     if (bassSynth && bassSynth.voices) {
                         // Use rampTime of 0.05s on all voices
