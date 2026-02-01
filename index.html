@@ -27,8 +27,17 @@
         let analyser, canvas, ctx, animationId;
 
         function setupAudio() {
+            // Master Output Chain (Soft Clipping)
+            const limiter = new Tone.Limiter(-1).toDestination();
+            const compressor = new Tone.Compressor({
+                threshold: -20,
+                ratio: 3,
+                attack: 0.01,
+                release: 0.25
+            }).connect(limiter);
+
             // Sidechain effect node
-            sidechainGain = new Tone.Gain(1).toDestination();
+            sidechainGain = new Tone.Gain(1).connect(compressor);
 
             // Kick Drum
             kickSynth = new Tone.MembraneSynth({
@@ -39,10 +48,10 @@
                     attack: 0.001,
                     decay: 0.4,
                     sustain: 0.01,
-                    release: 1.4,
+                    release: 1.4, // Minimum 0.1s
                     attackCurve: "exponential"
                 }
-            }).toDestination();
+            }).connect(compressor);
 
             // Bass Synth (SuperSaw)
             bassSynth = new Tone.PolySynth(Tone.MonoSynth, {
@@ -55,7 +64,7 @@
             leadFilter = new Tone.Filter({
                 frequency: 1000,
                 type: "lowpass",
-                resonance: 8
+                resonance: 8 // Max 10
             }).connect(sidechainGain);
 
             leadSynth = new Tone.MonoSynth({
@@ -68,15 +77,17 @@
             noiseSynth = new Tone.NoiseSynth({
                 noise: { type: "white" },
                 envelope: { attack: 4, decay: 0.2, sustain: 0.5, release: 2 }
-            }).toDestination();
+            }).connect(compressor);
 
             snareSynth = new Tone.NoiseSynth({
                 noise: { type: "white" },
-                envelope: { attack: 0.001, decay: 0.1, sustain: 0 }
-            }).toDestination();
+                envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 }
+            }).connect(compressor);
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
+            // Connect to analyser before limiter to see true peak?
+            // Usually we want to see what the user hears.
             Tone.Destination.connect(analyser);
 
             setupVisualizer();
@@ -114,8 +125,9 @@
         function triggerSidechain(time) {
             sidechainGain.gain.cancelScheduledValues(time);
             sidechainGain.gain.setValueAtTime(1, time);
-            sidechainGain.gain.exponentialRampToValueAtTime(0.01, time + 0.01);
-            sidechainGain.gain.exponentialRampToValueAtTime(1, time + 0.16);
+            // -10dB volume dip (approx 0.316) with 0.05s rampTime
+            sidechainGain.gain.rampTo(0.316, 0.05, time);
+            sidechainGain.gain.rampTo(1, 0.1, time + 0.05);
         }
 
         function initSocket() {
@@ -158,11 +170,16 @@
 
             socket.on('param_update', (data) => {
                 if (data.param === 'lead_cutoff') {
-                    leadFilter.frequency.rampTo(data.value, 0.1);
+                    // Clamp between 400Hz and 9000Hz
+                    const clampedVal = Math.max(400, Math.min(9000, data.value));
+                    leadFilter.frequency.rampTo(clampedVal, 0.05);
                 } else if (data.param === 'bass_spread') {
-                    if (bassSynth) {
-                        bassSynth.set({
-                            oscillator: { spread: data.value }
+                    if (bassSynth && bassSynth.voices) {
+                        // Use rampTime of 0.05s on all voices
+                        bassSynth.voices.forEach(voice => {
+                            if (voice.oscillator && voice.oscillator.spread) {
+                                voice.oscillator.spread.rampTo(data.value, 0.05);
+                            }
                         });
                     }
                 }
