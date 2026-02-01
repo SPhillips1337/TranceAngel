@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generative Trance - Switch Angel Method</title>
+    <title>Generative Trance - Python Brain + Tone.js</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js" integrity="sha512-jduERlz7En1IUZR54bqzpNI64AbffZWR//KJgF71SJ8D8/liKFZ+s1RxmUmB+bhCnIfzebdZsULwOrbVB5f3nQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
     <div id="ui-container">
@@ -14,6 +15,149 @@
         <button id="start-stop-btn">START</button>
     </div>
     <canvas id="visualizer"></canvas>
-    <script src="main.js"></script>
+
+    <script>
+        let socket;
+        let isPlaying = false;
+        let isInitialized = false;
+
+        // Audio components
+        let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let analyser, canvas, ctx, animationId;
+
+        function setupAudio() {
+            // Sidechain effect node
+            sidechainGain = new Tone.Gain(1).toDestination();
+
+            // Kick Drum
+            kickSynth = new Tone.MembraneSynth({
+                pitchDecay: 0.05,
+                octaves: 10,
+                oscillator: { type: "sine" },
+                envelope: {
+                    attack: 0.001,
+                    decay: 0.4,
+                    sustain: 0.01,
+                    release: 1.4,
+                    attackCurve: "exponential"
+                }
+            }).toDestination();
+
+            // Bass Synth (SuperSaw)
+            bassSynth = new Tone.PolySynth(Tone.MonoSynth, {
+                oscillator: { type: "fatsawtooth", count: 3, spread: 25 },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.4 },
+                filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.1, baseFrequency: 100, octaves: 2.5 }
+            }).connect(sidechainGain);
+
+            // Lead Synth (Acid)
+            leadFilter = new Tone.Filter({
+                frequency: 1000,
+                type: "lowpass",
+                resonance: 8
+            }).connect(sidechainGain);
+
+            leadSynth = new Tone.MonoSynth({
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 },
+                filterEnvelope: { attack: 0.001, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
+            }).connect(leadFilter);
+
+            // Visualizer Setup
+            analyser = new Tone.Analyser("waveform", 1024);
+            Tone.Destination.connect(analyser);
+
+            setupVisualizer();
+        }
+
+        function setupVisualizer() {
+            canvas = document.getElementById("visualizer");
+            ctx = canvas.getContext("2d");
+            window.addEventListener("resize", () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            });
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            draw();
+        }
+
+        function draw() {
+            animationId = requestAnimationFrame(draw);
+            const buffer = analyser.getValue();
+            ctx.fillStyle = "#050505";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "#00ffcc";
+            for (let i = 0; i < buffer.length; i++) {
+                const x = (i / buffer.length) * canvas.width;
+                const y = ((buffer[i] + 1) / 2) * canvas.height;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        function triggerSidechain(time) {
+            sidechainGain.gain.cancelScheduledValues(time);
+            sidechainGain.gain.setValueAtTime(1, time);
+            sidechainGain.gain.exponentialRampToValueAtTime(0.01, time + 0.01);
+            sidechainGain.gain.exponentialRampToValueAtTime(1, time + 0.16);
+        }
+
+        function initSocket() {
+            socket = io();
+
+            socket.on('trigger_kick', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1; // 100ms look-ahead to handle jitter
+                kickSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                triggerSidechain(now + lookAhead);
+            });
+
+            socket.on('trigger_bass', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                bassSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+            });
+
+            socket.on('trigger_lead', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                leadSynth.detune.setValueAtTime(data.detune, now + lookAhead);
+                leadSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+            });
+
+            socket.on('param_update', (data) => {
+                if (data.param === 'lead_cutoff') {
+                    leadFilter.frequency.rampTo(data.value, 0.1);
+                }
+            });
+
+            socket.on('state_change', (data) => {
+                document.getElementById('state-display').innerText = `State: ${data.state} (Bar ${data.bar})`;
+            });
+        }
+
+        document.getElementById("start-stop-btn").addEventListener("click", async () => {
+            if (!isPlaying) {
+                await Tone.start();
+                if (!isInitialized) {
+                    setupAudio();
+                    initSocket();
+                    isInitialized = true;
+                }
+                socket.emit('start_music');
+                isPlaying = true;
+                document.getElementById("start-stop-btn").innerText = "STOP";
+            } else {
+                if (socket) socket.emit('stop_music');
+                isPlaying = false;
+                document.getElementById("start-stop-btn").innerText = "START";
+                document.getElementById("state-display").innerText = "State: Stopped";
+            }
+        });
+    </script>
 </body>
 </html>
