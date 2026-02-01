@@ -23,18 +23,21 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
-        let noiseSynth, snareSynth;
+        let noiseSynth, snareSynth, noiseGate;
+        let leadDelay, leadReverb, reverbFilter;
         let analyser, canvas, ctx, animationId;
 
         function setupAudio() {
-            // Master Output Chain (Soft Clipping)
+            // Nuclear Fix 3: Explicit lookAhead and timing
+            Tone.context.lookAhead = 0.1;
+
+            // Master Output Chain (Nuclear Fix 4: strict 12kHz Low Pass)
             const limiter = new Tone.Limiter(-1).toDestination();
 
-            // Master De-Hisser (Highshelf filter to tilt down high end)
-            const deHisser = new Tone.Filter({
-                type: "highshelf",
-                frequency: 8000,
-                gain: -6
+            const masterFilter = new Tone.Filter({
+                type: "lowpass",
+                frequency: 12000,
+                rolloff: -12
             }).connect(limiter);
 
             const compressor = new Tone.Compressor({
@@ -42,10 +45,13 @@
                 ratio: 3,
                 attack: 0.01,
                 release: 0.25
-            }).connect(deHisser);
+            }).connect(masterFilter);
 
             // Sidechain effect node
             sidechainGain = new Tone.Gain(1).connect(compressor);
+
+            // Nuclear Fix 1: Noise Gate for high-gain/noise FX
+            noiseGate = new Tone.Gate(-50).connect(compressor);
 
             // Kick Drum
             kickSynth = new Tone.MembraneSynth({
@@ -75,22 +81,40 @@
                 resonance: 8
             }).connect(sidechainGain);
 
+            // Nuclear Fix 2: Delay/Reverb Feedback Damping
+            leadDelay = new Tone.PingPongDelay({
+                delayTime: "8n",
+                feedback: 0.4, // Max 0.4
+                wet: 0.3
+            }).connect(sidechainGain);
+
+            reverbFilter = new Tone.Filter(4000, "lowpass").connect(sidechainGain);
+            leadReverb = new Tone.Reverb({
+                decay: 3,
+                preDelay: 0.01,
+                wet: 0.3
+            }).connect(reverbFilter);
+
             leadSynth = new Tone.MonoSynth({
                 oscillator: { type: "sawtooth6" },
                 envelope: { attack: 0.02, decay: 0.2, sustain: 0.2, release: 0.5 },
                 filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
             }).connect(leadFilter);
 
-            // FX
+            // Connection chain for Lead
+            leadFilter.connect(leadDelay);
+            leadDelay.connect(leadReverb);
+
+            // FX with Noise Gate
             noiseSynth = new Tone.NoiseSynth({
                 noise: { type: "white" },
                 envelope: { attack: 4, decay: 0.2, sustain: 0.5, release: 2 }
-            }).connect(compressor);
+            }).connect(noiseGate);
 
             snareSynth = new Tone.NoiseSynth({
                 noise: { type: "white" },
                 envelope: { attack: 0.02, decay: 0.1, sustain: 0, release: 0.1 }
-            }).connect(compressor);
+            }).connect(noiseGate);
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
@@ -210,6 +234,15 @@
 
             socket.on('state_change', (data) => {
                 document.getElementById('state-display').innerText = `State: ${data.state} (Bar ${data.bar})`;
+
+                // Nuclear Fix 3: Hard Mute Noise during Breakdown
+                if (data.state === "Breakdown") {
+                    noiseSynth.volume.rampTo(-Infinity, 0.05);
+                    snareSynth.volume.rampTo(-Infinity, 0.05);
+                } else {
+                    noiseSynth.volume.rampTo(0, 0.05);
+                    snareSynth.volume.rampTo(0, 0.05);
+                }
             });
         }
 
