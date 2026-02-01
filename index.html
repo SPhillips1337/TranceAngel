@@ -28,30 +28,41 @@
         let analyser, canvas, ctx, animationId;
 
         function setupAudio() {
-            // Nuclear Fix 3: Explicit lookAhead and timing
+            // Optimizations from Tone.js Wiki & Tutorials
+            Tone.context.latencyHint = "playback";
             Tone.context.lookAhead = 0.1;
 
-            // Master Output Chain (Nuclear Fix 4: strict 12kHz Low Pass)
+            // Advanced Mastering Chain
             const limiter = new Tone.Limiter(-1).toDestination();
 
-            const masterFilter = new Tone.Filter({
+            const masterLP = new Tone.Filter({
                 type: "lowpass",
                 frequency: 12000,
                 rolloff: -12
             }).connect(limiter);
 
-            const compressor = new Tone.Compressor({
+            // "Air Cut" EQ3
+            const masterEQ = new Tone.EQ3({
+                low: 0,
+                mid: 0,
+                high: -6,
+                highFrequency: 8000
+            }).connect(masterLP);
+
+            // Soft-Knee Compressor
+            const masterComp = new Tone.Compressor({
                 threshold: -20,
                 ratio: 3,
                 attack: 0.01,
-                release: 0.25
-            }).connect(masterFilter);
+                release: 0.25,
+                knee: 30 // Soft-Knee
+            }).connect(masterEQ);
 
             // Sidechain effect node
-            sidechainGain = new Tone.Gain(1).connect(compressor);
+            sidechainGain = new Tone.Gain(1).connect(masterComp);
 
-            // Nuclear Fix 1: Noise Gate for high-gain/noise FX
-            noiseGate = new Tone.Gate(-50).connect(compressor);
+            // Noise Gate to prevent "Zombie" hiss
+            noiseGate = new Tone.Gate(-50).connect(masterComp);
 
             // Kick Drum
             kickSynth = new Tone.MembraneSynth({
@@ -59,32 +70,37 @@
                 octaves: 10,
                 oscillator: { type: "sine" },
                 envelope: {
-                    attack: 0.02, // Zero-crossing smoothing
+                    attack: 0.02,
                     decay: 0.4,
                     sustain: 0.01,
                     release: 1.4,
                     attackCurve: "exponential"
                 }
-            }).connect(compressor);
+            }).connect(masterComp);
 
-            // Bass Synth (SuperSaw) - sawtooth6 to limit harmonics
+            // Bass Synth (SuperSaw)
             bassSynth = new Tone.PolySynth(Tone.MonoSynth, {
                 oscillator: { type: "fatsawtooth6", count: 3, spread: 20 },
-                envelope: { attack: 0.02, decay: 0.1, sustain: 0.4, release: 0.4 },
+                envelope: {
+                    attack: 0.02,
+                    decay: 0.1,
+                    sustain: 0.4,
+                    release: 0.4,
+                    releaseCurve: "exponential"
+                },
                 filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 100, octaves: 2.5 }
             }).connect(sidechainGain);
 
-            // Lead Synth (Acid)
+            // Lead Synth (Hiss-Free FMSynth)
             leadFilter = new Tone.Filter({
                 frequency: 1000,
                 type: "lowpass",
                 resonance: 8
             }).connect(sidechainGain);
 
-            // Nuclear Fix 2: Delay/Reverb Feedback Damping
             leadDelay = new Tone.PingPongDelay({
                 delayTime: "8n",
-                feedback: 0.4, // Max 0.4
+                feedback: 0.4,
                 wet: 0.3
             }).connect(sidechainGain);
 
@@ -95,25 +111,52 @@
                 wet: 0.3
             }).connect(reverbFilter);
 
-            leadSynth = new Tone.MonoSynth({
+            leadSynth = new Tone.FMSynth({
+                harmonicity: 1.5,
+                modulationIndex: 5, // Clean/Glassy
                 oscillator: { type: "sawtooth6" },
-                envelope: { attack: 0.02, decay: 0.2, sustain: 0.2, release: 0.5 },
-                filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 200, octaves: 4 }
+                envelope: {
+                    attack: 0.02,
+                    decay: 0.2,
+                    sustain: 0.2,
+                    release: 0.5,
+                    releaseCurve: "exponential"
+                },
+                modulation: { type: "sine" },
+                modulationEnvelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 0.5 }
             }).connect(leadFilter);
 
-            // Connection chain for Lead
             leadFilter.connect(leadDelay);
             leadDelay.connect(leadReverb);
 
-            // FX with Noise Gate
-            noiseSynth = new Tone.NoiseSynth({
-                noise: { type: "white" },
-                envelope: { attack: 4, decay: 0.2, sustain: 0.5, release: 2 }
+            // Noise Sampler (Replacement for NoiseSynth)
+            // Procedurally generate a noise buffer
+            const bufferSize = Tone.context.sampleRate * 4;
+            const buffer = Tone.context.createBuffer(1, bufferSize, Tone.context.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            const noiseBuffer = new Tone.ToneAudioBuffer(buffer);
+
+            noiseSynth = new Tone.Sampler({
+                urls: { "C4": noiseBuffer },
+                envelope: {
+                    attack: 4,
+                    release: 2,
+                    releaseCurve: "exponential"
+                }
             }).connect(noiseGate);
 
-            snareSynth = new Tone.NoiseSynth({
-                noise: { type: "white" },
-                envelope: { attack: 0.02, decay: 0.1, sustain: 0, release: 0.1 }
+            snareSynth = new Tone.Sampler({
+                urls: { "C4": noiseBuffer },
+                envelope: {
+                    attack: 0.02,
+                    decay: 0.1,
+                    sustain: 0,
+                    release: 0.1,
+                    releaseCurve: "exponential"
+                }
             }).connect(noiseGate);
 
             // Visualizer Setup
@@ -198,16 +241,16 @@
             socket.on('trigger_riser', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
-                noiseSynth.triggerAttack(now + lookAhead);
+                noiseSynth.triggerAttack("C4", now + lookAhead);
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
-                noiseSynth.triggerRelease(now + lookAhead + durationSeconds);
+                noiseSynth.triggerRelease("C4", now + lookAhead + durationSeconds);
             });
 
             socket.on('trigger_snare', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
-                snareSynth.triggerAttackRelease(data.duration, now + lookAhead);
+                snareSynth.triggerAttackRelease("C4", data.duration, now + lookAhead);
             });
 
             socket.on('param_update', (data) => {
