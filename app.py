@@ -3,7 +3,7 @@ import random
 from flask import Flask, render_template, send_from_directory
 from flask_socketio import SocketIO, emit
 
-app = Flask(__name__, template_folder='.', static_folder='.')
+app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Configuration
