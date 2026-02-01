@@ -10,10 +10,21 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
+    <div id="code-log"></div>
     <div id="ui-container">
         <h1>Generative Trance</h1>
         <p id="state-display">State: Stopped</p>
         <button id="start-stop-btn">START</button>
+
+        <div id="instrument-toggles">
+            <button class="toggle-btn active" data-inst="kick">KICK</button>
+            <button class="toggle-btn active" data-inst="bass">BASS</button>
+            <button class="toggle-btn active" data-inst="lead">SYNTH</button>
+            <button class="toggle-btn active" data-inst="chords">CHORDS</button>
+            <button class="toggle-btn active" data-inst="piano">PIANO</button>
+            <button class="toggle-btn active" data-inst="pads">PADS</button>
+            <button class="toggle-btn active" data-inst="arp">ARP</button>
+        </div>
 
         <div id="controls">
             <div class="control-group">
@@ -44,10 +55,15 @@
                 <label>Load Pattern (MIDI JSON)</label>
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
             </div>
+            <div class="control-group">
+                <button id="reset-btn">Reset Settings</button>
+                <button id="hide-ui-btn">Hide UI</button>
+            </div>
         </div>
     </div>
     <canvas id="matrix-bg"></canvas>
     <canvas id="visualizer"></canvas>
+    <canvas id="histogram"></canvas>
 
     <script>
         let socket;
@@ -56,9 +72,11 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let chordSynth, pianoSynth, padSynth, arpSynth;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
-        let analyser, canvas, ctx, animationId, meter;
+        let analyser, fftAnalyser, canvas, ctx, animationId, meter;
+        let histCanvas, histCtx;
 
         // Matrix components
         let matrixCanvas, matrixCtx, matrixDrops = [], matrixHue = 120; // 120 is Hacker Green
@@ -68,6 +86,33 @@
         let midiAccess = null;
         let midiOut = null;
         let midiIn = null;
+
+        // Toggle states
+        let enabledInstruments = {
+            kick: true,
+            bass: true,
+            lead: true,
+            chords: true,
+            piano: true,
+            pads: true,
+            arp: true
+        };
+
+        function logCode(line) {
+            const container = document.getElementById('code-log');
+            const el = document.createElement('div');
+            el.className = 'code-line executed';
+            el.innerText = line;
+            container.appendChild(el);
+
+            // Keep only latest lines
+            while (container.childNodes.length > 15) {
+                container.removeChild(container.firstChild);
+            }
+
+            // Smoothly remove "executed" class after animation
+            setTimeout(() => el.classList.remove('executed'), 500);
+        }
 
         function setupAudio() {
             // Optimizations from Tone.js Wiki & Tutorials
@@ -176,6 +221,34 @@
             leadFilter.connect(leadDelay);
             leadDelay.connect(leadReverb);
 
+            // Chord Synth
+            chordSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sawtooth" },
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 }
+            }).connect(sidechainGain);
+            chordSynth.volume.value = -10;
+
+            // Piano Synth (Stylized)
+            pianoSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 0.5, sustain: 0, release: 0.5 }
+            }).connect(masterComp);
+            pianoSynth.volume.value = -5;
+
+            // Pad Synth
+            padSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "triangle" },
+                envelope: { attack: 2, decay: 1, sustain: 0.8, release: 2 }
+            }).connect(sidechainGain);
+            padSynth.volume.value = -15;
+
+            // Arp Synth
+            arpSynth = new Tone.FMSynth({
+                oscillator: { type: "square" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
+            }).connect(sidechainGain);
+            arpSynth.volume.value = -12;
+
             // Noise Sampler (Replacement for NoiseSynth)
             // Procedurally generate a noise buffer
             const bufferSize = Tone.context.sampleRate * 4;
@@ -209,6 +282,9 @@
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
             Tone.Destination.connect(analyser);
+
+            fftAnalyser = new Tone.Analyser("fft", 256);
+            Tone.Destination.connect(fftAnalyser);
 
             setupVisualizer();
             setupMatrix();
@@ -262,17 +338,27 @@
         function setupVisualizer() {
             canvas = document.getElementById("visualizer");
             ctx = canvas.getContext("2d");
+
+            histCanvas = document.getElementById("histogram");
+            histCtx = histCanvas.getContext("2d");
+
             window.addEventListener("resize", () => {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
+                histCanvas.width = window.innerWidth;
+                histCanvas.height = window.innerHeight;
             });
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+            histCanvas.width = window.innerWidth;
+            histCanvas.height = window.innerHeight;
             draw();
         }
 
         function draw() {
             animationId = requestAnimationFrame(draw);
+
+            // Waveform Visualizer
             const buffer = analyser.getValue();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
@@ -285,6 +371,22 @@
                 else ctx.lineTo(x, y);
             }
             ctx.stroke();
+
+            // Histogram (FFT)
+            if (fftAnalyser) {
+                const fftData = fftAnalyser.getValue();
+                histCtx.clearRect(0, 0, histCanvas.width, histCanvas.height);
+                const barWidth = (histCanvas.width / fftData.length) * 2.5;
+                let x = 0;
+
+                for (let i = 0; i < fftData.length; i++) {
+                    // FFT data is in dB, typically -100 to 0
+                    const barHeight = (fftData[i] + 100) * (histCanvas.height / 100);
+                    histCtx.fillStyle = "#00ffcc";
+                    histCtx.fillRect(x, histCanvas.height - barHeight, barWidth, barHeight);
+                    x += barWidth + 1;
+                }
+            }
         }
 
         function triggerSidechain(time) {
@@ -395,6 +497,7 @@
                 const now = Tone.now();
                 const lookAhead = 0.1;
                 triggerSidechain(now + lookAhead);
+                logCode("with_fx :sidechain do");
             });
 
             socket.on('trigger_kick', (data) => {
@@ -403,6 +506,7 @@
                 const time = now + lookAhead;
                 kickSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
+                logCode(`  sample :bd_haus, rate: 1, amp: 1`);
             });
 
             socket.on('trigger_bass', (data) => {
@@ -411,6 +515,7 @@
                 const time = now + lookAhead;
                 bassSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 1); // Channel 2
+                logCode(`  play :${data.note.replace('1', '')}1, release: 0.1, synth: :prophet`);
             });
 
             socket.on('trigger_lead', (data) => {
@@ -431,6 +536,7 @@
                 leadSynth.detune.setValueAtTime(data.detune, time);
                 leadSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 0); // Channel 1
+                logCode(`  play :${data.note}, detune: ${data.detune.toFixed(2)}`);
             });
 
             socket.on('trigger_riser', (data) => {
@@ -440,12 +546,42 @@
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
                 noiseSynth.triggerRelease("C4", now + lookAhead + durationSeconds);
+                logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
             socket.on('trigger_snare', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
                 snareSynth.triggerAttackRelease("C4", data.duration, now + lookAhead);
+                logCode(`  sample :sn_dnb, amp: 0.5`);
+            });
+
+            socket.on('trigger_chords', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                chordSynth.triggerAttackRelease(data.notes, data.duration, now + lookAhead);
+                logCode(`  play_chord [:${data.notes.join(', :')}], release: 1`);
+            });
+
+            socket.on('trigger_piano', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                pianoSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, synth: :piano`);
+            });
+
+            socket.on('trigger_pads', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                padSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, release: 4, synth: :hollow`);
+            });
+
+            socket.on('trigger_arp', (data) => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                arpSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                logCode(`  play :${data.note}, synth: :arp`);
             });
 
             socket.on('param_update', (data) => {
@@ -458,6 +594,7 @@
 
                     leadFilter.frequency.rampTo(clampedVal, 0.05);
                     leadFilter.Q.rampTo(currentQ, 0.05);
+                    logCode(`control :lead, cutoff: ${clampedVal.toFixed(0)}`);
                 } else if (data.param === 'bass_spread') {
                     if (bassSynth && bassSynth.voices) {
                         // Use rampTime of 0.05s on all voices
@@ -488,6 +625,7 @@
                     if (noiseSynth) noiseSynth.volume.rampTo(0, 0.05);
                     if (snareSynth) snareSynth.volume.rampTo(0, 0.05);
                 }
+                logCode(`# Transition to ${data.state.toUpperCase()}`);
             });
         }
 
@@ -534,6 +672,67 @@
             document.getElementById('reverb-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value) / 100;
                 if (leadReverb) leadReverb.wet.rampTo(val, 0.1);
+            });
+
+            document.getElementById('reset-btn').addEventListener('click', () => {
+                // Reset Sliders
+                document.getElementById('cutoff-slider').value = 1000;
+                document.getElementById('width-slider').value = 20;
+                document.getElementById('reverb-slider').value = 30;
+
+                // Reset Audio Params
+                if (leadFilter) leadFilter.frequency.rampTo(1000, 0.1);
+                if (bassSynth && bassSynth.voices) {
+                    bassSynth.voices.forEach(voice => {
+                        if (voice.oscillator && voice.oscillator.spread) {
+                            voice.oscillator.spread.rampTo(20, 0.1);
+                        }
+                    });
+                }
+                if (leadReverb) leadReverb.wet.rampTo(0.3, 0.1);
+
+                // Reset Pattern on Backend
+                if (socket) socket.emit('reset_pattern');
+            });
+
+            document.getElementById('hide-ui-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.getElementById('ui-container').style.display = 'none';
+            });
+
+            window.addEventListener('click', () => {
+                const ui = document.getElementById('ui-container');
+                if (ui.style.display === 'none') {
+                    ui.style.display = 'block';
+                }
+            });
+
+            // Instrument Toggles
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const inst = btn.getAttribute('data-inst');
+                    enabledInstruments[inst] = !enabledInstruments[inst];
+                    btn.classList.toggle('active', enabledInstruments[inst]);
+
+                    // Update Mute State
+                    const synths = {
+                        kick: [kickSynth],
+                        bass: [bassSynth],
+                        lead: [leadSynth],
+                        chords: [chordSynth],
+                        piano: [pianoSynth],
+                        pads: [padSynth],
+                        arp: [arpSynth]
+                    };
+
+                    if (synths[inst]) {
+                        synths[inst].forEach(s => {
+                            if (s) s.volume.mute = !enabledInstruments[inst];
+                        });
+                    }
+
+                    logCode(`# Instrument ${inst.toUpperCase()} ${enabledInstruments[inst] ? 'ENABLED' : 'DISABLED'}`);
+                });
             });
         }
 
