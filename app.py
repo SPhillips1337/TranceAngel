@@ -21,6 +21,7 @@ class Sequencer:
         self.sixteenth_count = 0
         self.melody_step = 0
         self.thread = None
+        self.pattern = None
 
     def start(self):
         if not self.is_running:
@@ -81,6 +82,24 @@ class Sequencer:
             socketio.emit('trigger_bass', {'note': SCALE[0], 'duration': '16n'})
 
     def play_lead(self):
+        # Use MIDI pattern if available
+        if self.pattern and 'tracks' in self.pattern:
+            track = self.pattern['tracks'][0]
+            # Find notes that should play at this time
+            # current_time_in_beats = self.bar_count * 4 + self.sixteenth_count * 0.25
+            # For simplicity, we loop through the notes in the track
+            # and trigger them based on their time
+            for note_data in track.get('notes', []):
+                note_time_beats = note_data.get('time', 0) * (BPM / 60) # Convert time in seconds to beats
+                current_beats = self.bar_count * 4 + self.sixteenth_count * 0.25
+                if abs(note_time_beats - current_beats) < 0.05: # Close enough to the tick
+                    socketio.emit('trigger_lead', {
+                        'note': note_data.get('name', 'G3'),
+                        'duration': '16n',
+                        'detune': (random.random() - 0.5) * 20
+                    })
+            return
+
         prob = 0.3
         if self.state == "Drop": prob = 0.6
         if self.state == "Breakdown": prob = 0.2
@@ -152,6 +171,11 @@ def handle_start():
 def handle_stop():
     print('Stopping music')
     sequencer.stop()
+
+@socketio.on('update_pattern')
+def handle_update_pattern(pattern):
+    print('Pattern updated')
+    sequencer.pattern = pattern
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)

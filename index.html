@@ -6,6 +6,7 @@
     <title>Generative Trance - Python Brain + Tone.js</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js" integrity="sha512-jduERlz7En1IUZR54bqzpNI64AbffZWR//KJgF71SJ8D8/liKFZ+s1RxmUmB+bhCnIfzebdZsULwOrbVB5f3nQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
@@ -27,6 +28,22 @@
                 <label>Reverb Mix</label>
                 <input type="range" id="reverb-slider" min="0" max="100" value="30">
             </div>
+            <div class="control-group">
+                <label>MIDI Out</label>
+                <select id="midi-out-select">
+                    <option value="none">None (Internal Only)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>MIDI In</label>
+                <select id="midi-in-select">
+                    <option value="none">None</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Load Pattern (MIDI JSON)</label>
+                <input type="file" id="midi-upload" accept=".json, .mid, .midi">
+            </div>
         </div>
     </div>
     <canvas id="visualizer"></canvas>
@@ -41,6 +58,11 @@
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
         let analyser, canvas, ctx, animationId;
+
+        // MIDI components
+        let midiAccess = null;
+        let midiOut = null;
+        let midiIn = null;
 
         function setupAudio() {
             // Optimizations from Tone.js Wiki & Tutorials
@@ -219,6 +241,99 @@
             sidechainGain.gain.rampTo(1, 0.1, time + 0.05);
         }
 
+        async function initMIDI() {
+            if (navigator.requestMIDIAccess) {
+                try {
+                    midiAccess = await navigator.requestMIDIAccess({ sysex: true, software: true });
+                    updateMIDIDevices();
+                    midiAccess.onstatechange = updateMIDIDevices;
+                } catch (e) {
+                    console.error("MIDI Access Denied", e);
+                }
+            }
+        }
+
+        function updateMIDIDevices() {
+            const outSelect = document.getElementById("midi-out-select");
+            const inSelect = document.getElementById("midi-in-select");
+
+            const currentOut = outSelect.value;
+            const currentIn = inSelect.value;
+
+            outSelect.innerHTML = '<option value="none">None (Internal Only)</option>';
+            inSelect.innerHTML = '<option value="none">None</option>';
+
+            midiAccess.outputs.forEach((output) => {
+                const option = document.createElement("option");
+                option.value = output.id;
+                option.text = output.name;
+                outSelect.appendChild(option);
+            });
+
+            midiAccess.inputs.forEach((input) => {
+                const option = document.createElement("option");
+                option.value = input.id;
+                option.text = input.name;
+                inSelect.appendChild(option);
+            });
+
+            outSelect.value = currentOut;
+            inSelect.value = currentIn;
+        }
+
+        function sendMIDINote(note, duration, time, channel = 0) {
+            if (!midiOut) return;
+            const noteNum = Tone.Frequency(note).toMidi();
+            const velocity = 0x7f;
+            const onMsg = [0x90 + channel, noteNum, velocity];
+            const offMsg = [0x80 + channel, noteNum, velocity];
+
+            // Scheduling MIDI is harder, we use setTimeout as a fallback for simple demo
+            const delay = (time - Tone.now()) * 1000;
+            const durMs = Tone.Time(duration).toMilliseconds();
+
+            setTimeout(() => {
+                midiOut.send(onMsg);
+                setTimeout(() => midiOut.send(offMsg), durMs);
+            }, Math.max(0, delay));
+        }
+
+        async function handleMIDIPattern(file) {
+            if (file.name.endsWith('.json')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const pattern = JSON.parse(e.target.result);
+                    socket.emit('update_pattern', pattern);
+                };
+                reader.readAsText(file);
+            } else {
+                // Parse .mid file using @tonejs/midi
+                const arrayBuffer = await file.arrayBuffer();
+                const midi = new Midi(arrayBuffer);
+                socket.emit('update_pattern', midi.toJSON());
+            }
+        }
+
+        function handleMIDIIn(event) {
+            const [status, data1, data2] = event.data;
+            const type = status & 0xf0;
+            const channel = status & 0x0f;
+
+            if (type === 0xb0) { // CC
+                if (data1 === 74) { // Brightness/Cutoff
+                    const val = (data2 / 127) * 8600 + 400; // Map 0-127 to 400-9000
+                    if (leadFilter) leadFilter.frequency.rampTo(val, 0.05);
+                    document.getElementById('cutoff-slider').value = val;
+                }
+            }
+
+            // Basic Clock Sync (0xF8) - very simplified
+            if (status === 0xf8) {
+                // In a real app, we'd calculate BPM from clock pulses
+                // 24 pulses per quarter note
+            }
+        }
+
         function initSocket() {
             socket = io();
 
@@ -231,13 +346,17 @@
             socket.on('trigger_kick', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1; // 100ms look-ahead to handle jitter
-                kickSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                const time = now + lookAhead;
+                kickSynth.triggerAttackRelease(data.note, data.duration, time);
+                sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
             });
 
             socket.on('trigger_bass', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
-                bassSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                const time = now + lookAhead;
+                bassSynth.triggerAttackRelease(data.note, data.duration, time);
+                sendMIDINote(data.note, data.duration, time, 1); // Channel 2
             });
 
             socket.on('trigger_lead', (data) => {
@@ -257,6 +376,7 @@
 
                 leadSynth.detune.setValueAtTime(data.detune, time);
                 leadSynth.triggerAttackRelease(data.note, data.duration, time);
+                sendMIDINote(data.note, data.duration, time, 0); // Channel 1
             });
 
             socket.on('trigger_riser', (data) => {
@@ -311,6 +431,29 @@
         }
 
         function setupUI() {
+            document.getElementById("midi-upload").addEventListener("change", (e) => {
+                const file = e.target.files[0];
+                if (file) handleMIDIPattern(file);
+            });
+
+            document.getElementById("midi-out-select").addEventListener("change", (e) => {
+                if (e.target.value === "none") {
+                    midiOut = null;
+                } else {
+                    midiOut = midiAccess.outputs.get(e.target.value);
+                }
+            });
+
+            document.getElementById("midi-in-select").addEventListener("change", (e) => {
+                if (midiIn) midiIn.onmidimessage = null;
+                if (e.target.value === "none") {
+                    midiIn = null;
+                } else {
+                    midiIn = midiAccess.inputs.get(e.target.value);
+                    midiIn.onmidimessage = handleMIDIIn;
+                }
+            });
+
             document.getElementById('cutoff-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
                 if (leadFilter) leadFilter.frequency.rampTo(val, 0.1);
@@ -338,6 +481,7 @@
                 await Tone.start();
                 if (!isInitialized) {
                     setupAudio();
+                    await initMIDI();
                     setupUI();
                     initSocket();
                     isInitialized = true;
