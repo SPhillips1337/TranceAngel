@@ -10,6 +10,7 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
+    <div id="code-log"></div>
     <div id="ui-container">
         <h1>Generative Trance</h1>
         <p id="state-display">State: Stopped</p>
@@ -74,6 +75,22 @@
         let midiAccess = null;
         let midiOut = null;
         let midiIn = null;
+
+        function logCode(line) {
+            const container = document.getElementById('code-log');
+            const el = document.createElement('div');
+            el.className = 'code-line executed';
+            el.innerText = line;
+            container.appendChild(el);
+
+            // Keep only latest lines
+            while (container.childNodes.length > 15) {
+                container.removeChild(container.firstChild);
+            }
+
+            // Smoothly remove "executed" class after animation
+            setTimeout(() => el.classList.remove('executed'), 500);
+        }
 
         function setupAudio() {
             // Optimizations from Tone.js Wiki & Tutorials
@@ -430,6 +447,7 @@
                 const now = Tone.now();
                 const lookAhead = 0.1;
                 triggerSidechain(now + lookAhead);
+                logCode("with_fx :sidechain do");
             });
 
             socket.on('trigger_kick', (data) => {
@@ -438,6 +456,7 @@
                 const time = now + lookAhead;
                 kickSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
+                logCode(`  sample :bd_haus, rate: 1, amp: 1`);
             });
 
             socket.on('trigger_bass', (data) => {
@@ -446,6 +465,7 @@
                 const time = now + lookAhead;
                 bassSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 1); // Channel 2
+                logCode(`  play :${data.note.replace('1', '')}1, release: 0.1, synth: :prophet`);
             });
 
             socket.on('trigger_lead', (data) => {
@@ -466,6 +486,7 @@
                 leadSynth.detune.setValueAtTime(data.detune, time);
                 leadSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 0); // Channel 1
+                logCode(`  play :${data.note}, detune: ${data.detune.toFixed(2)}`);
             });
 
             socket.on('trigger_riser', (data) => {
@@ -475,12 +496,14 @@
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
                 noiseSynth.triggerRelease("C4", now + lookAhead + durationSeconds);
+                logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
             socket.on('trigger_snare', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1;
                 snareSynth.triggerAttackRelease("C4", data.duration, now + lookAhead);
+                logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
             socket.on('param_update', (data) => {
@@ -493,6 +516,7 @@
 
                     leadFilter.frequency.rampTo(clampedVal, 0.05);
                     leadFilter.Q.rampTo(currentQ, 0.05);
+                    logCode(`control :lead, cutoff: ${clampedVal.toFixed(0)}`);
                 } else if (data.param === 'bass_spread') {
                     if (bassSynth && bassSynth.voices) {
                         // Use rampTime of 0.05s on all voices
@@ -523,6 +547,7 @@
                     if (noiseSynth) noiseSynth.volume.rampTo(0, 0.05);
                     if (snareSynth) snareSynth.volume.rampTo(0, 0.05);
                 }
+                logCode(`# Transition to ${data.state.toUpperCase()}`);
             });
         }
 

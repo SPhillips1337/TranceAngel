@@ -124,3 +124,49 @@ input[type=range] {
     color: #050505;
     box-shadow: 0 0 10px #00ffcc;
 }
+
+#code-log {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: 400px;
+    max-height: 25vh;
+    z-index: 100;
+    pointer-events: none;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.code-line {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9rem;
+    color: #00ffcc;
+    text-shadow: 0 0 5px #00ffcc;
+    margin-bottom: 2px;
+    opacity: 0.9;
+    white-space: pre-wrap;
+    animation: code-entry 0.3s ease-out;
+}
+
+.code-line.executed {
+    animation: code-blink 0.5s ease-in-out;
+}
+
+@keyframes code-entry {
+    from {
+        transform: translateX(-10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 0.9;
+    }
+}
+
+@keyframes code-blink {
+    0% { background-color: rgba(0, 255, 204, 0.3); color: #fff; }
+    50% { background-color: rgba(0, 255, 204, 0.1); color: #00ffcc; }
+    100% { background-color: transparent; }
+}
