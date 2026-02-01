@@ -4,7 +4,7 @@ body, html {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background-color: #050505;
+    background-color: transparent;
     color: #00ffcc;
     font-family: 'Courier New', Courier, monospace;
 }
@@ -53,11 +53,46 @@ h1 {
     box-shadow: 0 0 15px #00ffcc;
 }
 
+#controls {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.control-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+}
+
+.control-group label {
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+input[type=range] {
+    cursor: pointer;
+    flex-grow: 1;
+}
+
 #visualizer {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 1;
+    z-index: 2;
+    pointer-events: none;
+}
+
+#matrix-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background-color: #000;
 }
