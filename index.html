@@ -46,6 +46,7 @@
             </div>
         </div>
     </div>
+    <canvas id="matrix-bg"></canvas>
     <canvas id="visualizer"></canvas>
 
     <script>
@@ -57,7 +58,11 @@
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
-        let analyser, canvas, ctx, animationId;
+        let analyser, canvas, ctx, animationId, meter;
+
+        // Matrix components
+        let matrixCanvas, matrixCtx, matrixDrops = [], matrixHue = 120; // 120 is Hacker Green
+        let matrixInterval;
 
         // MIDI components
         let midiAccess = null;
@@ -68,6 +73,10 @@
             // Optimizations from Tone.js Wiki & Tutorials
             Tone.context.latencyHint = "playback";
             Tone.context.lookAhead = 0.1;
+
+            // Audio Link for Visuals
+            meter = new Tone.Meter();
+            Tone.Destination.connect(meter);
 
             // Safety: Master Gate and Limiter
             const masterGate = new Tone.Gate(-50).toDestination();
@@ -202,6 +211,52 @@
             Tone.Destination.connect(analyser);
 
             setupVisualizer();
+            setupMatrix();
+        }
+
+        function setupMatrix() {
+            matrixCanvas = document.getElementById("matrix-bg");
+            matrixCtx = matrixCanvas.getContext("2d");
+
+            const resize = () => {
+                matrixCanvas.width = window.innerWidth;
+                matrixCanvas.height = window.innerHeight;
+                const columns = Math.floor(matrixCanvas.width / 20);
+                matrixDrops = Array(columns).fill(1);
+            };
+
+            window.addEventListener("resize", resize);
+            resize();
+
+            const chars = "0123456789ABCDEF!@#$%^&*()_+-=[]{}|;:,.<>?/root@admin:~#".split("");
+
+            matrixInterval = setInterval(() => {
+                if (!isPlaying) return;
+
+                // Audio Reactivity
+                const level = Tone.dbToGain(meter.getValue());
+                const speedBoost = 1 + level * 5;
+                const glow = Math.floor(level * 20);
+
+                matrixCtx.fillStyle = "rgba(0, 0, 0, 0.05)";
+                matrixCtx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
+
+                matrixCtx.fillStyle = `hsla(${matrixHue}, 100%, 50%, ${0.5 + level})`;
+                matrixCtx.font = "15px monospace";
+                matrixCtx.shadowBlur = glow;
+                matrixCtx.shadowColor = `hsl(${matrixHue}, 100%, 50%)`;
+
+                for (let i = 0; i < matrixDrops.length; i++) {
+                    const text = chars[Math.floor(Math.random() * chars.length)];
+                    matrixCtx.fillText(text, i * 20, matrixDrops[i] * 20);
+
+                    if (matrixDrops[i] * 20 > matrixCanvas.height && Math.random() > 0.975) {
+                        matrixDrops[i] = 0;
+                    }
+
+                    matrixDrops[i] += speedBoost;
+                }
+            }, 33); // ~30 FPS
         }
 
         function setupVisualizer() {
@@ -219,8 +274,7 @@
         function draw() {
             animationId = requestAnimationFrame(draw);
             const buffer = analyser.getValue();
-            ctx.fillStyle = "#050505";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
             ctx.lineWidth = 2;
             ctx.strokeStyle = "#00ffcc";
@@ -419,13 +473,20 @@
             socket.on('state_change', (data) => {
                 document.getElementById('state-display').innerText = `State: ${data.state} (Bar ${data.bar})`;
 
+                // Randomize Matrix Hue on state change
+                // Groove: Green(120), Breakdown: Purple(280), Build: Orange(30), Drop: Red(0)
+                if (data.state === "Groove") matrixHue = 120;
+                else if (data.state === "Breakdown") matrixHue = 280;
+                else if (data.state === "Build-up") matrixHue = 30;
+                else if (data.state === "Drop") matrixHue = 0;
+
                 // Nuclear Fix 3: Hard Mute Noise during Breakdown
                 if (data.state === "Breakdown") {
-                    noiseSynth.volume.rampTo(-Infinity, 0.05);
-                    snareSynth.volume.rampTo(-Infinity, 0.05);
+                    if (noiseSynth) noiseSynth.volume.rampTo(-Infinity, 0.05);
+                    if (snareSynth) snareSynth.volume.rampTo(-Infinity, 0.05);
                 } else {
-                    noiseSynth.volume.rampTo(0, 0.05);
-                    snareSynth.volume.rampTo(0, 0.05);
+                    if (noiseSynth) noiseSynth.volume.rampTo(0, 0.05);
+                    if (snareSynth) snareSynth.volume.rampTo(0, 0.05);
                 }
             });
         }
