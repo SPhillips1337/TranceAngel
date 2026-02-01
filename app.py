@@ -66,10 +66,12 @@ class Sequencer:
         socketio.emit('state_change', {'state': self.state, 'bar': self.bar_count})
 
     def play_kick(self):
-        if self.state == "Breakdown":
-            return
         if self.sixteenth_count % 4 == 0:
-            socketio.emit('trigger_kick', {'note': 'C1', 'duration': '8n'})
+            # Ghost Kick: always trigger sidechain for the pumping effect
+            socketio.emit('trigger_sidechain')
+
+            if self.state != "Breakdown":
+                socketio.emit('trigger_kick', {'note': 'C1', 'duration': '8n'})
 
     def play_bass(self):
         if self.state in ["Breakdown", "Build-up"]:

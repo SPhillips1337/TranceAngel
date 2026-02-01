@@ -53,6 +53,30 @@ h1 {
     box-shadow: 0 0 15px #00ffcc;
 }
 
+#controls {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.control-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+}
+
+.control-group label {
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+input[type=range] {
+    cursor: pointer;
+    flex-grow: 1;
+}
+
 #visualizer {
     position: fixed;
     top: 0;

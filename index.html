@@ -13,6 +13,21 @@
         <h1>Generative Trance</h1>
         <p id="state-display">State: Stopped</p>
         <button id="start-stop-btn">START</button>
+
+        <div id="controls">
+            <div class="control-group">
+                <label>Acid Cutoff</label>
+                <input type="range" id="cutoff-slider" min="400" max="9000" value="1000">
+            </div>
+            <div class="control-group">
+                <label>SuperSaw Width</label>
+                <input type="range" id="width-slider" min="0" max="100" value="20">
+            </div>
+            <div class="control-group">
+                <label>Reverb Mix</label>
+                <input type="range" id="reverb-slider" min="0" max="100" value="30">
+            </div>
+        </div>
     </div>
     <canvas id="visualizer"></canvas>
 
@@ -32,8 +47,9 @@
             Tone.context.latencyHint = "playback";
             Tone.context.lookAhead = 0.1;
 
-            // Advanced Mastering Chain
-            const limiter = new Tone.Limiter(-1).toDestination();
+            // Safety: Master Gate and Limiter
+            const masterGate = new Tone.Gate(-50).toDestination();
+            const limiter = new Tone.Limiter(-1).connect(masterGate);
 
             const masterLP = new Tone.Filter({
                 type: "lowpass",
@@ -41,11 +57,11 @@
                 rolloff: -12
             }).connect(limiter);
 
-            // "Air Cut" EQ3
+            // "Air Cut" EQ3: highs pulled back by -5dB above 8kHz
             const masterEQ = new Tone.EQ3({
                 low: 0,
                 mid: 0,
-                high: -6,
+                high: -5,
                 highFrequency: 8000
             }).connect(masterLP);
 
@@ -206,11 +222,16 @@
         function initSocket() {
             socket = io();
 
+            socket.on('trigger_sidechain', () => {
+                const now = Tone.now();
+                const lookAhead = 0.1;
+                triggerSidechain(now + lookAhead);
+            });
+
             socket.on('trigger_kick', (data) => {
                 const now = Tone.now();
                 const lookAhead = 0.1; // 100ms look-ahead to handle jitter
                 kickSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
-                triggerSidechain(now + lookAhead);
             });
 
             socket.on('trigger_bass', (data) => {
@@ -289,11 +310,35 @@
             });
         }
 
+        function setupUI() {
+            document.getElementById('cutoff-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                if (leadFilter) leadFilter.frequency.rampTo(val, 0.1);
+            });
+
+            document.getElementById('width-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                if (bassSynth && bassSynth.voices) {
+                    bassSynth.voices.forEach(voice => {
+                        if (voice.oscillator && voice.oscillator.spread) {
+                            voice.oscillator.spread.rampTo(val, 0.1);
+                        }
+                    });
+                }
+            });
+
+            document.getElementById('reverb-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value) / 100;
+                if (leadReverb) leadReverb.wet.rampTo(val, 0.1);
+            });
+        }
+
         document.getElementById("start-stop-btn").addEventListener("click", async () => {
             if (!isPlaying) {
                 await Tone.start();
                 if (!isInitialized) {
                     setupAudio();
+                    setupUI();
                     initSocket();
                     isInitialized = true;
                 }
