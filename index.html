@@ -570,19 +570,13 @@
             }
         }
 
-        // Timing management to prevent conflicts
-        let lastTriggerTime = 0;
-        const minInterval = 0.001; // 1ms minimum between triggers
-
-        function getSafeTime() {
-            const now = Tone.now();
-            const proposedTime = now + Math.random() * 0.01 + 0.2; // Increased lookahead for network latency
-            if (proposedTime <= lastTriggerTime + minInterval) {
-                lastTriggerTime = lastTriggerTime + minInterval;
-                return lastTriggerTime;
+        function safeTrigger(synth, note, duration) {
+            try {
+                const time = Tone.now() + 0.1;
+                synth.triggerAttackRelease(note, duration, time);
+            } catch (error) {
+                console.warn('Synth trigger failed:', error);
             }
-            lastTriggerTime = proposedTime;
-            return proposedTime;
         }
 
         function initSocket() {
@@ -595,14 +589,14 @@
             socket.on('trigger_sidechain', () => {
                 
                 
-                triggerSidechain(getSafeTime());
+                triggerSidechain(Tone.now() + 0.1);
                 logCode("with_fx :sidechain do");
             });
 
             socket.on('trigger_kick', (data) => {
                 
                  // Add jitter to prevent timing conflicts
-                const time = getSafeTime();
+                const time = Tone.now() + 0.1;
                 kickSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
                 logCode(`  sample :bd_haus, rate: 1, amp: 1`);
@@ -611,7 +605,7 @@
             socket.on('trigger_bass', (data) => {
                 
                 
-                const time = getSafeTime();
+                const time = Tone.now() + 0.1;
                 bassSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 1); // Channel 2
                 logCode(`  play :${data.note.replace('1', '')}1, release: 0.1, synth: :prophet`);
@@ -620,7 +614,7 @@
             socket.on('trigger_lead', (data) => {
                 
                 
-                const time = getSafeTime();
+                const time = Tone.now() + 0.1;
 
                 // Harmonic Tracking (Key Follow): Base Cutoff = Note Frequency * 3
                 const freq = Tone.Frequency(data.note).toFrequency();
@@ -641,45 +635,45 @@
             socket.on('trigger_riser', (data) => {
                 
                 
-                noiseSynth.triggerAttack("C4", getSafeTime());
+                noiseSynth.triggerAttack("C4", Tone.now() + 0.1);
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
-                noiseSynth.triggerRelease("C4", getSafeTime() + durationSeconds);
+                noiseSynth.triggerRelease("C4", Tone.now() + 0.1 + durationSeconds);
                 logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
             socket.on('trigger_snare', (data) => {
                 
                 
-                snareSynth.triggerAttackRelease("C4", data.duration, getSafeTime());
+                snareSynth; safeTrigger("C4", data.duration);
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
             socket.on('trigger_chords', (data) => {
                 
                 
-                chordSynth.triggerAttackRelease(data.notes, data.duration, getSafeTime());
+                chordSynth; safeTrigger(chordSynth, data.notes, data.duration);
                 logCode(`  play_chord [:${data.notes.join(', :')}], release: 1`);
             });
 
             socket.on('trigger_piano', (data) => {
                 
                 
-                pianoSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
+                safeTrigger(pianoSynth, data.note, data.duration);
                 logCode(`  play :${data.note}, synth: :piano`);
             });
 
             socket.on('trigger_pads', (data) => {
                 
                 
-                padSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
+                padSynth; safeTrigger(pianoSynth, data.note, data.duration);
                 logCode(`  play :${data.note}, release: 4, synth: :hollow`);
             });
 
             socket.on('trigger_arp', (data) => {
                 
                 
-                arpSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
+                arpSynth; safeTrigger(pianoSynth, data.note, data.duration);
                 logCode(`  play :${data.note}, synth: :arp`);
             });
 
