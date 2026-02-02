@@ -18,6 +18,7 @@
         <h1>Generative Trance</h1>
         <p id="state-display">State: Stopped</p>
         <button id="start-stop-btn">START</button>
+        <button id="mixer-toggle-btn">MIXER</button>
 
         <div id="instrument-toggles">
             <button class="toggle-btn active" data-inst="kick">KICK</button>
@@ -117,16 +118,51 @@
                 <button id="hide-ui-btn">Hide UI</button>
             </div>
         </div>
+
+        <div id="mixer-controls" style="display: none;">
+            <h2>Mixer</h2>
+            <div class="control-group">
+                <label>Kick Volume</label>
+                <input type="range" id="kick-volume-slider" data-inst="kick" min="-40" max="0" value="-6" step="1">
+            </div>
+            <div class="control-group">
+                <label>Bass Volume</label>
+                <input type="range" id="bass-volume-slider" data-inst="bass" min="-40" max="0" value="-6" step="1">
+            </div>
+            <div class="control-group">
+                <label>Lead Volume</label>
+                <input type="range" id="lead-volume-slider" data-inst="lead" min="-40" max="0" value="-12" step="1">
+            </div>
+            <div class="control-group">
+                <label>Chords Volume</label>
+                <input type="range" id="chords-volume-slider" data-inst="chords" min="-40" max="0" value="-10" step="1">
+            </div>
+            <div class="control-group">
+                <label>Piano Volume</label>
+                <input type="range" id="piano-volume-slider" data-inst="piano" min="-40" max="0" value="-5" step="1">
+            </div>
+            <div class="control-group">
+                <label>Pads Volume</label>
+                <input type="range" id="pads-volume-slider" data-inst="pads" min="-40" max="0" value="-15" step="1">
+            </div>
+            <div class="control-group">
+                <label>Arp Volume</label>
+                <input type="range" id="arp-volume-slider" data-inst="arp" min="-40" max="0" value="-12" step="1">
+            </div>
+            <button id="back-to-main-controls-btn">BACK</button>
+        </div>
     </div>
     <canvas id="matrix-bg"></canvas>
     <canvas id="visualizer"></canvas>
     <canvas id="histogram"></canvas>
 
     <script>
+        // Cache bust v2.0 - Fixed Sampler issues
         let socket;
         let isPlaying = false;
         let isInitialized = false;
         let isReactive = false;
+        let audioStarted = false;
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
@@ -219,30 +255,43 @@
             // Noise Gate to prevent "Zombie" hiss
             noiseGate = new Tone.Gate(-50).connect(masterComp);
 
-            // Kick Drum (Sample-based)
-            kickSynth = new Tone.Sampler({
-                urls: { "C1": "https://tonejs.github.io/audio/drum-samples/CR78/kick.mp3" },
-                onload: () => console.log("Kick sample loaded")
+            // Kick Drum (Trance-style with sub bass)
+            kickSynth = new Tone.MembraneSynth({
+                pitchDecay: 0.008,
+                octaves: 4,
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.2 }
             }).connect(masterComp);
+            kickSynth.volume.value = 0;
 
-            // Bass Synth (SuperSaw)
-            bassSynth = new Tone.PolySynth(Tone.MonoSynth, {
-                oscillator: { type: "fatsawtooth6", count: 3, spread: 20 },
-                envelope: {
-                    attack: 0.02,
-                    decay: 0.1,
-                    sustain: 0.4,
-                    release: 0.4,
-                    releaseCurve: "exponential"
+            // Bass Synth (Trance supersaw bass)
+            bassSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { 
+                    type: "fatsawtooth",
+                    count: 3,
+                    spread: 30
                 },
-                filterEnvelope: { attack: 0.02, decay: 0.1, sustain: 0.1, baseFrequency: 100, octaves: 2.5 }
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.4 },
+                filter: { frequency: 350, type: "lowpass", rolloff: -24 },
+                filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.4, baseFrequency: 200, octaves: 2 }
             }).connect(sidechainGain);
+            bassSynth.volume.value = -6;
 
             // Lead Synth (Hiss-Free FMSynth)
+            // Lead Filter (Classic trance filter sweep)
             leadFilter = new Tone.Filter({
-                frequency: 1000,
+                frequency: 600,
                 type: "lowpass",
-                resonance: 8
+                rolloff: -24,
+                Q: 4
+            });
+
+            // Arp Filter for taming high frequencies
+            const arpFilter = new Tone.Filter({
+                frequency: 800, // Start with a reasonable cutoff
+                type: "lowpass",
+                rolloff: -12,
+                Q: 2 // Gentle resonance
             });
 
             leadDistortion = new Tone.Distortion(0.5);
@@ -256,9 +305,10 @@
             leadDistortion.connect(leadChorus);
             leadChorus.connect(sidechainGain);
 
-            leadLFO = new Tone.LFO("4n", 400, 4000).start();
+            // Trance-style LFO for filter sweeps
+            leadLFO = new Tone.LFO("2n", 400, 900).start();
             leadLFO.connect(leadFilter.frequency);
-            leadLFO.amplitude.setValueAtTime(0, Tone.now());
+            leadLFO.amplitude.setValueAtTime(0.8, Tone.now());
 
             reactiveSignal = new Tone.Signal(0);
             reactiveSignal.connect(leadFilter.frequency);
@@ -276,19 +326,17 @@
                 wet: 0.3
             }).connect(reverbFilter);
 
-            leadSynth = new Tone.FMSynth({
-                harmonicity: 1.5,
-                modulationIndex: 5, // Clean/Glassy
-                oscillator: { type: "sawtooth6" },
-                envelope: {
-                    attack: 0.02,
-                    decay: 0.2,
-                    sustain: 0.2,
-                    release: 0.5,
-                    releaseCurve: "exponential"
+            // Lead Synth (Trance pluck/lead)
+            leadSynth = new Tone.PolySynth(Tone.Synth, {
+                volume: -12,
+                oscillator: { 
+                    type: "fatsawtooth",
+                    count: 3,
+                    spread: 40
                 },
-                modulation: { type: "sine" },
-                modulationEnvelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 0.5 }
+                envelope: { attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.8 },
+                filter: { frequency: 1200, type: "lowpass", rolloff: -12 },
+                filterEnvelope: { attack: 0.01, decay: 0.3, sustain: 0.35, release: 1.2, baseFrequency: 600, octaves: 1 }
             }).connect(leadFilter);
 
             // Connect chorus output to parallel FX as well
@@ -320,32 +368,30 @@
             arpSynth = new Tone.FMSynth({
                 oscillator: { type: "square" },
                 envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 }
-            }).connect(sidechainGain);
+            }).connect(arpFilter);
+            arpFilter.connect(sidechainGain);
             arpSynth.volume.value = -12;
 
-            // FX Synth (Gurgling Theremin)
-            noiseSynth = new Tone.Sampler({
-                urls: { "C1": "https://tonejs.github.io/audio/berklee/gurgling_theremin_1.mp3" },
-                onload: () => console.log("FX sample loaded")
+            // FX Synth (White Noise) - Simplified
+            noiseSynth = new Tone.NoiseSynth({
+                noise: { type: "white" },
+                envelope: { attack: 0.1, decay: 0.2, sustain: 0.1, release: 0.8 }
             }).connect(noiseGate);
+            noiseSynth.volume.value = -20;
 
-            // Snare Synth (CR78)
-            snareSynth = new Tone.Sampler({
-                urls: { "C1": "https://tonejs.github.io/audio/drum-samples/CR78/snare.mp3" },
-                onload: () => console.log("Snare sample loaded")
+            // Snare Synth (NoiseSynth - reliable)
+            snareSynth = new Tone.NoiseSynth({
+                noise: { type: "white" },
+                envelope: { attack: 0.005, decay: 0.1, sustain: 0.0 }
             }).connect(noiseGate);
+            snareSynth.volume.value = -6;
 
-            // BPM-Synced Loop (GrainPlayer)
-            topLoopPlayer = new Tone.GrainPlayer({
-                url: "https://tonejs.github.io/audio/drum-samples/loops/ominous.mp3",
-                loop: true,
-                grainSize: 0.1,
-                overlap: 0.05,
-                onload: () => {
-                    console.log("Loop sample loaded");
-                    topLoopPlayer.playbackRate = 1.0; // Default (140/140)
-                }
+            // BPM-Synced Loop - Simplified oscillator instead of external sample
+            topLoopPlayer = new Tone.Oscillator({
+                frequency: 55,
+                type: "sawtooth"
             }).connect(masterComp);
+            topLoopPlayer.volume.value = -25;
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
@@ -593,12 +639,11 @@
             });
 
             socket.on('trigger_kick', (data) => {
+                if (!audioStarted || !enabledInstruments.kick) return;
                 
-                 // Add jitter to prevent timing conflicts
                 const time = Tone.now() + Math.random() * 0.01 + 0.1;
-                // Use sample mapped to C1
-                if (kickSynth) kickSynth.triggerAttackRelease("C1", data.duration, time);
-                sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
+                if (kickSynth) kickSynth.triggerAttackRelease("C2", "16n", time);
+                sendMIDINote("C1", "16n", time, 9);
                 logCode(`  sample :bd_haus, rate: 1, amp: 1`);
             });
 
@@ -624,9 +669,8 @@
                 const currentQ = Math.max(1, 15 - (baseCutoff / 1000));
 
                 leadFilter.frequency.setValueAtTime(baseCutoff, time);
-                leadFilter.Q.setValueAtTime(currentQ, time);
+                leadFilter.Q.value = currentQ;
 
-                leadSynth.detune.setValueAtTime(data.detune, time);
                 leadSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 0); // Channel 1
                 logCode(`  play :${data.note}, detune: ${data.detune.toFixed(2)}`);
@@ -643,9 +687,10 @@
             });
 
             socket.on('trigger_snare', (data) => {
+                if (!audioStarted || !enabledInstruments.kick) return;
                 
-                const time = Tone.now() + Math.random() * 0.01 + 0.1;
-                if (snareSynth) snareSynth.triggerAttackRelease("C1", data.duration, time);
+                const time = Tone.now() + Math.random() * 0.01 + 0.13;
+                if (snareSynth) snareSynth.triggerAttackRelease("8n", time);
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
@@ -673,7 +718,7 @@
             socket.on('trigger_arp', (data) => {
                 
                 
-                arpSynth; safeTrigger(pianoSynth, data.note, data.duration);
+                safeTrigger(arpSynth, data.note, data.duration);
                 logCode(`  play :${data.note}, synth: :arp`);
             });
 
@@ -728,7 +773,7 @@
                 Tone.Transport.bpm.value = bpm;
                 document.getElementById('bpm-display').innerText = bpm;
                 if (topLoopPlayer) {
-                    topLoopPlayer.playbackRate = bpm / 140;
+                    topLoopPlayer.frequency.value = 55 * (bpm / 140);
                 }
                 logCode(`# BPM set to ${bpm}`);
             });
@@ -949,11 +994,54 @@
 
                     if (synths[inst]) {
                         synths[inst].forEach(s => {
-                            if (s) s.volume.mute = !enabledInstruments[inst];
+                            if (s) {
+                                s.volume.mute = !enabledInstruments[inst];
+                            }
                         });
                     }
 
                     logCode(`# Instrument ${inst.toUpperCase()} ${enabledInstruments[inst] ? 'ENABLED' : 'DISABLED'}`);
+                });
+            });
+
+            // Mixer UI Toggle
+            const mainControls = document.getElementById('controls');
+            const mixerControls = document.getElementById('mixer-controls');
+            const mixerToggleBtn = document.getElementById('mixer-toggle-btn');
+            const backToMainControlsBtn = document.getElementById('back-to-main-controls-btn');
+
+            mixerToggleBtn.addEventListener('click', () => {
+                mainControls.style.display = 'none';
+                mixerControls.style.display = 'block';
+                logCode(`# Mixer UI Enabled`);
+            });
+
+            backToMainControlsBtn.addEventListener('click', () => {
+                mainControls.style.display = 'block';
+                mixerControls.style.display = 'none';
+                logCode(`# Main Controls UI Enabled`);
+            });
+
+            // Volume Sliders for Mixer
+            const volumeSliders = document.querySelectorAll('#mixer-controls input[type="range"]');
+            const synthMap = {
+                kick: kickSynth,
+                bass: bassSynth,
+                lead: leadSynth,
+                chords: chordSynth,
+                piano: pianoSynth,
+                pads: padSynth,
+                arp: arpSynth
+            };
+
+            volumeSliders.forEach(slider => {
+                slider.addEventListener('input', (e) => {
+                    const inst = e.target.getAttribute('data-inst');
+                    const volume = parseFloat(e.target.value);
+                    if (synthMap[inst]) {
+                        synthMap[inst].volume.value = volume;
+                        logCode(`# ${inst.toUpperCase()} Volume: ${volume}dB`);
+                    }
                 });
             });
         }
@@ -962,6 +1050,7 @@
             if (!isPlaying) {
                 try {
                     await Tone.start();
+                    audioStarted = true;
                     console.log('Audio context started successfully');
                 } catch (error) {
                     console.error('Failed to start audio context:', error);

@@ -329,6 +329,19 @@ def test_ollama():
     response = generate_with_ollama("Say 'Ollama is working!' in exactly 3 words.")
     return {"ollama_response": response, "working": response is not None}
 
+@app.route('/api/generate-pattern', methods=['POST'])
+def generate_pattern():
+    from trance_ai import TranceAI
+    
+    data = request.json
+    state = data.get('state', 'groove')
+    energy = data.get('energy', 0.7)
+    
+    ai = TranceAI()
+    pattern = ai.generate_state_pattern(state, energy)
+    
+    return {"pattern": pattern, "state": state, "energy": energy}
+
 @app.route('/api/generate-music', methods=['POST'])
 def generate_music():
     prompt = request.json.get('prompt', '')
