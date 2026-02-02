@@ -1,5 +1,7 @@
 import time
 import random
+import json
+import os
 from flask import Flask, render_template, send_from_directory
 from flask_socketio import SocketIO, emit
 
@@ -22,6 +24,48 @@ class Sequencer:
         self.melody_step = 0
         self.thread = None
         self.pattern = None
+        self.mutation = 0.0
+
+    def note_to_midi(self, name):
+        base_map = {'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11}
+        try:
+            note_parts = name[:-1]
+            octave = int(name[-1])
+            return (octave + 1) * 12 + base_map.get(note_parts, 0)
+        except:
+            return 60
+
+    def snap_to_scale(self, note_name):
+        target_midi = self.note_to_midi(note_name)
+        closest_note = SCALE[0]
+        min_dist = 999
+        for s_note in SCALE:
+            s_midi = self.note_to_midi(s_note)
+            dist = abs(s_midi - target_midi)
+            if dist < min_dist:
+                min_dist = dist
+                closest_note = s_note
+        return closest_note
+
+    def process_pattern(self, pattern):
+        """Transpose to G Minor and snap to scale."""
+        if not pattern or 'tracks' not in pattern:
+            return pattern
+
+        # Simple transposition: shift everything so the first note is in G minor scale
+        # or just snap everything. Snapping is safer for trance.
+        for track in pattern['tracks']:
+            for note in track.get('notes', []):
+                note['name'] = self.snap_to_scale(note['name'])
+        return pattern
+
+    def load_seed_pattern(self, name):
+        filepath = f"patterns/{name}.json"
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                pattern = json.load(f)
+                self.pattern = self.process_pattern(pattern)
+                print(f"Loaded seed pattern: {name}")
 
     def start(self):
         if not self.is_running:
@@ -89,16 +133,23 @@ class Sequencer:
         # Use MIDI pattern if available
         if self.pattern and 'tracks' in self.pattern:
             track = self.pattern['tracks'][0]
-            # Find notes that should play at this time
-            # current_time_in_beats = self.bar_count * 4 + self.sixteenth_count * 0.25
-            # For simplicity, we loop through the notes in the track
-            # and trigger them based on their time
+            # Loop pattern every 4 beats
+            current_beats_in_bar = self.sixteenth_count * 0.25
+
             for note_data in track.get('notes', []):
-                note_time_beats = note_data.get('time', 0) * (BPM / 60) # Convert time in seconds to beats
-                current_beats = self.bar_count * 4 + self.sixteenth_count * 0.25
-                if abs(note_time_beats - current_beats) < 0.05: # Close enough to the tick
+                note_time_beats = note_data.get('time', 0) * (BPM / 60)
+                # Loop the pattern time within 4 beats
+                pattern_time = note_time_beats % 4
+
+                if abs(pattern_time - current_beats_in_bar) < 0.05:
+                    note = note_data.get('name', 'G3')
+
+                    # Apply Mutation
+                    if random.random() < self.mutation:
+                        note = random.choice(SCALE[7:17]) # Range around center
+
                     socketio.emit('trigger_lead', {
-                        'note': note_data.get('name', 'G3'),
+                        'note': note,
                         'duration': '16n',
                         'detune': (random.random() - 0.5) * 20
                     })
@@ -219,12 +270,25 @@ def handle_stop():
 @socketio.on('update_pattern')
 def handle_update_pattern(pattern):
     print('Pattern updated')
-    sequencer.pattern = pattern
+    sequencer.pattern = sequencer.process_pattern(pattern)
+
+@socketio.on('set_seed_pattern')
+def handle_set_seed_pattern(data):
+    name = data.get('name')
+    if name:
+        sequencer.load_seed_pattern(name)
+
+@socketio.on('set_mutation')
+def handle_set_mutation(data):
+    val = data.get('value', 0)
+    sequencer.mutation = float(val) / 100.0
+    print(f"Mutation set to {sequencer.mutation}")
 
 @socketio.on('reset_pattern')
 def handle_reset_pattern():
     print('Pattern reset')
     sequencer.pattern = None
+    sequencer.mutation = 0.0
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)

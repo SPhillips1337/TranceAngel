@@ -52,6 +52,19 @@
                 </select>
             </div>
             <div class="control-group">
+                <label>Melodic Seed</label>
+                <select id="seed-select">
+                    <option value="none">None (Generative)</option>
+                    <option value="uplifting_arp">Uplifting Arp</option>
+                    <option value="rolling_bassline">Rolling Bassline</option>
+                    <option value="acid_sequence">Acid Sequence</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Mutation</label>
+                <input type="range" id="mutation-slider" min="0" max="100" value="0">
+            </div>
+            <div class="control-group">
                 <label>Load Pattern (MIDI JSON)</label>
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
             </div>
@@ -674,11 +687,29 @@
                 if (leadReverb) leadReverb.wet.rampTo(val, 0.1);
             });
 
+            document.getElementById('seed-select').addEventListener('change', (e) => {
+                const val = e.target.value;
+                if (val === "none") {
+                    socket.emit('reset_pattern');
+                } else {
+                    socket.emit('set_seed_pattern', { name: val });
+                }
+                logCode(`# Seed Pattern set to ${val.toUpperCase()}`);
+            });
+
+            document.getElementById('mutation-slider').addEventListener('input', (e) => {
+                const val = parseInt(e.target.value);
+                socket.emit('set_mutation', { value: val });
+                logCode(`# Mutation set to ${val}%`);
+            });
+
             document.getElementById('reset-btn').addEventListener('click', () => {
                 // Reset Sliders
                 document.getElementById('cutoff-slider').value = 1000;
                 document.getElementById('width-slider').value = 20;
                 document.getElementById('reverb-slider').value = 30;
+                document.getElementById('mutation-slider').value = 0;
+                document.getElementById('seed-select').value = "none";
 
                 // Reset Audio Params
                 if (leadFilter) leadFilter.frequency.rampTo(1000, 0.1);
