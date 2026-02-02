@@ -10,6 +10,9 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
+    <div id="loading-overlay">
+        <h1>LOADING SAMPLES...</h1>
+    </div>
     <div id="code-log"></div>
     <div id="ui-container">
         <h1>Generative Trance</h1>
@@ -27,6 +30,11 @@
         </div>
 
         <div id="controls">
+            <div class="control-group">
+                <label>BPM</label>
+                <input type="range" id="bpm-slider" min="125" max="150" value="140">
+                <span id="bpm-display">140</span>
+            </div>
             <div class="control-group">
                 <label>Acid Cutoff</label>
                 <input type="range" id="cutoff-slider" min="400" max="9000" value="1000">
@@ -104,6 +112,7 @@
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
             </div>
             <div class="control-group">
+                <button id="save-midi-btn">Save MIDI</button>
                 <button id="reset-btn">Reset Settings</button>
                 <button id="hide-ui-btn">Hide UI</button>
             </div>
@@ -123,8 +132,12 @@
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
         let leadLFO, leadDistortion, leadChorus, reactiveSignal;
         let chordSynth, pianoSynth, padSynth, arpSynth;
-        let noiseSynth, snareSynth, noiseGate;
+        let noiseSynth, snareSynth, noiseGate, topLoopPlayer;
         let leadDelay, leadReverb, reverbFilter;
+
+        // MIDI Recording
+        let recordedNotes = [];
+        let melodySequence;
         let analyser, fftAnalyser, canvas, ctx, animationId, meter;
         let histCanvas, histCtx;
 
@@ -206,18 +219,10 @@
             // Noise Gate to prevent "Zombie" hiss
             noiseGate = new Tone.Gate(-50).connect(masterComp);
 
-            // Kick Drum
-            kickSynth = new Tone.MembraneSynth({
-                pitchDecay: 0.05,
-                octaves: 10,
-                oscillator: { type: "sine" },
-                envelope: {
-                    attack: 0.02,
-                    decay: 0.4,
-                    sustain: 0.01,
-                    release: 1.4,
-                    attackCurve: "exponential"
-                }
+            // Kick Drum (Sample-based)
+            kickSynth = new Tone.Sampler({
+                urls: { "C1": "https://tonejs.github.io/audio/drum-samples/CR78/kick.mp3" },
+                onload: () => console.log("Kick sample loaded")
             }).connect(masterComp);
 
             // Bass Synth (SuperSaw)
@@ -318,35 +323,29 @@
             }).connect(sidechainGain);
             arpSynth.volume.value = -12;
 
-            // Noise Sampler (Replacement for NoiseSynth)
-            // Procedurally generate a noise buffer
-            const bufferSize = Tone.context.sampleRate * 4;
-            const buffer = Tone.context.createBuffer(1, bufferSize, Tone.context.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                data[i] = Math.random() * 2 - 1;
-            }
-            const noiseBuffer = new Tone.ToneAudioBuffer(buffer);
-
+            // FX Synth (Gurgling Theremin)
             noiseSynth = new Tone.Sampler({
-                urls: { "C4": noiseBuffer },
-                envelope: {
-                    attack: 4,
-                    release: 2,
-                    releaseCurve: "exponential"
-                }
+                urls: { "C1": "https://tonejs.github.io/audio/berklee/gurgling_theremin_1.mp3" },
+                onload: () => console.log("FX sample loaded")
             }).connect(noiseGate);
 
+            // Snare Synth (CR78)
             snareSynth = new Tone.Sampler({
-                urls: { "C4": noiseBuffer },
-                envelope: {
-                    attack: 0.02,
-                    decay: 0.1,
-                    sustain: 0,
-                    release: 0.1,
-                    releaseCurve: "exponential"
-                }
+                urls: { "C1": "https://tonejs.github.io/audio/drum-samples/CR78/snare.mp3" },
+                onload: () => console.log("Snare sample loaded")
             }).connect(noiseGate);
+
+            // BPM-Synced Loop (GrainPlayer)
+            topLoopPlayer = new Tone.GrainPlayer({
+                url: "https://tonejs.github.io/audio/drum-samples/loops/ominous.mp3",
+                loop: true,
+                grainSize: 0.1,
+                overlap: 0.05,
+                onload: () => {
+                    console.log("Loop sample loaded");
+                    topLoopPlayer.playbackRate = 1.0; // Default (140/140)
+                }
+            }).connect(masterComp);
 
             // Visualizer Setup
             analyser = new Tone.Analyser("waveform", 1024);
@@ -378,10 +377,10 @@
             matrixInterval = setInterval(() => {
                 if (!isPlaying) return;
 
-                // Audio Reactivity
-                const level = Tone.dbToGain(meter.getValue());
-                const speedBoost = 1 + level * 5;
-                const glow = Math.floor(level * 20);
+                // Audio Reactivity (linked to dropSpeed)
+                const level = Tone.dbToGain(meter ? meter.getValue() : -Infinity);
+                const dropSpeed = 1 + level * 10; // faster during drops, slower during breakdowns
+                const glow = Math.floor(level * 25);
 
                 matrixCtx.fillStyle = "rgba(0, 0, 0, 0.05)";
                 matrixCtx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
@@ -399,7 +398,7 @@
                         matrixDrops[i] = 0;
                     }
 
-                    matrixDrops[i] += speedBoost;
+                    matrixDrops[i] += dropSpeed;
                 }
             }, 33); // ~30 FPS
         }
@@ -597,7 +596,8 @@
                 
                  // Add jitter to prevent timing conflicts
                 const time = Tone.now() + Math.random() * 0.01 + 0.1;
-                kickSynth.triggerAttackRelease(data.note, data.duration, time);
+                // Use sample mapped to C1
+                if (kickSynth) kickSynth.triggerAttackRelease("C1", data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
                 logCode(`  sample :bd_haus, rate: 1, amp: 1`);
             });
@@ -634,18 +634,18 @@
 
             socket.on('trigger_riser', (data) => {
                 
-                
-                noiseSynth.triggerAttack("C4", Tone.now() + Math.random() * 0.01 + 0.16);
+                const time = Tone.now() + Math.random() * 0.01 + 0.16;
+                if (noiseSynth) noiseSynth.triggerAttack("C1", time);
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
-                noiseSynth.triggerRelease("C4", Tone.now() + 0.1 + durationSeconds);
+                if (noiseSynth) noiseSynth.triggerRelease("C1", Tone.now() + 0.1 + durationSeconds);
                 logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
             socket.on('trigger_snare', (data) => {
                 
-                
-                safeTrigger(snareSynth, "C4", data.duration);
+                const time = Tone.now() + Math.random() * 0.01 + 0.1;
+                if (snareSynth) snareSynth.triggerAttackRelease("C1", data.duration, time);
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
@@ -723,6 +723,34 @@
         }
 
         function setupUI() {
+            document.getElementById('bpm-slider').addEventListener('input', (e) => {
+                const bpm = parseFloat(e.target.value);
+                Tone.Transport.bpm.value = bpm;
+                document.getElementById('bpm-display').innerText = bpm;
+                if (topLoopPlayer) {
+                    topLoopPlayer.playbackRate = bpm / 140;
+                }
+                logCode(`# BPM set to ${bpm}`);
+            });
+
+            document.getElementById('save-midi-btn').addEventListener('click', () => {
+                // Log recorded notes in @tonejs/midi format
+                const midiData = {
+                    header: { bpm: Tone.Transport.bpm.value, name: "Generative Trance" },
+                    tracks: [{
+                        name: "Lead",
+                        notes: recordedNotes.map(n => ({
+                            name: n.note,
+                            time: n.time,
+                            duration: n.duration,
+                            velocity: 0.8
+                        }))
+                    }]
+                };
+                console.log("SAVED MIDI:", JSON.stringify(midiData, null, 2));
+                logCode(`# MIDI sequence logged to console`);
+            });
+
             document.getElementById("midi-upload").addEventListener("change", (e) => {
                 const file = e.target.files[0];
                 if (file) handleMIDIPattern(file);
@@ -884,6 +912,23 @@
                 }
             });
 
+                // Switch Angel Motif Sequence
+                const angelMotif = ["G3", "D4", "G3", "Bb4", "G4"]; // 0, 4, 0, 9, 7 intervals (approx)
+                melodySequence = new Tone.Sequence((time, note) => {
+                    const duration = "16n";
+                    leadSynth.triggerAttackRelease(note, duration, time);
+
+                    // Record note for MIDI saving
+                    recordedNotes.push({
+                        note: note,
+                        time: Tone.Transport.seconds,
+                        duration: Tone.Time(duration).toSeconds()
+                    });
+                    if (recordedNotes.length > 100) recordedNotes.shift(); // Keep last 100
+
+                    logCode(`  play :${note} # Switch Angel`);
+                }, angelMotif, "8n");
+
             // Instrument Toggles
             document.querySelectorAll('.toggle-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -931,12 +976,27 @@
                 }
                 socket.emit('start_music');
                 isPlaying = true;
+                if (topLoopPlayer) topLoopPlayer.start();
+                if (melodySequence) melodySequence.start(0);
+                Tone.Transport.start();
                 document.getElementById("start-stop-btn").innerText = "STOP";
             } else {
                 if (socket) socket.emit('stop_music');
                 isPlaying = false;
+                if (topLoopPlayer) topLoopPlayer.stop();
+                if (melodySequence) melodySequence.stop();
+                Tone.Transport.stop();
                 document.getElementById("start-stop-btn").innerText = "START";
                 document.getElementById("state-display").innerText = "State: Stopped";
+            }
+        });
+
+        // Hide loading overlay once all samples are loaded
+        Tone.loaded().then(() => {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) {
+                overlay.style.display = 'none';
+                logCode('# All samples loaded successfully');
             }
         });
     </script>
