@@ -572,7 +572,7 @@
 
         function safeTrigger(synth, note, duration) {
             try {
-                const time = Tone.now() + 0.1;
+                const time = Tone.now() + Math.random() * 0.01 + 0.1;
                 synth.triggerAttackRelease(note, duration, time);
             } catch (error) {
                 console.warn('Synth trigger failed:', error);
@@ -596,7 +596,7 @@
             socket.on('trigger_kick', (data) => {
                 
                  // Add jitter to prevent timing conflicts
-                const time = Tone.now() + 0.1;
+                const time = Tone.now() + Math.random() * 0.01 + 0.1;
                 kickSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
                 logCode(`  sample :bd_haus, rate: 1, amp: 1`);
@@ -605,7 +605,7 @@
             socket.on('trigger_bass', (data) => {
                 
                 
-                const time = Tone.now() + 0.1;
+                const time = Tone.now() + Math.random() * 0.01 + 0.12;
                 bassSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 1); // Channel 2
                 logCode(`  play :${data.note.replace('1', '')}1, release: 0.1, synth: :prophet`);
@@ -614,7 +614,7 @@
             socket.on('trigger_lead', (data) => {
                 
                 
-                const time = Tone.now() + 0.1;
+                const time = Tone.now() + Math.random() * 0.01 + 0.14;
 
                 // Harmonic Tracking (Key Follow): Base Cutoff = Note Frequency * 3
                 const freq = Tone.Frequency(data.note).toFrequency();
@@ -635,7 +635,7 @@
             socket.on('trigger_riser', (data) => {
                 
                 
-                noiseSynth.triggerAttack("C4", Tone.now() + 0.1);
+                noiseSynth.triggerAttack("C4", Tone.now() + Math.random() * 0.01 + 0.16);
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
                 noiseSynth.triggerRelease("C4", Tone.now() + 0.1 + durationSeconds);
@@ -645,14 +645,14 @@
             socket.on('trigger_snare', (data) => {
                 
                 
-                snareSynth; safeTrigger("C4", data.duration);
+                safeTrigger(snareSynth, "C4", data.duration);
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
             socket.on('trigger_chords', (data) => {
                 
                 
-                chordSynth; safeTrigger(chordSynth, data.notes, data.duration);
+                safeTrigger(chordSynth, data.notes, data.duration);
                 logCode(`  play_chord [:${data.notes.join(', :')}], release: 1`);
             });
 
