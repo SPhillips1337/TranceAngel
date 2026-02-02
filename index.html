@@ -419,11 +419,13 @@
             animationId = requestAnimationFrame(draw);
 
             // Reactive Synthesis Logic
-            if (isReactive && leadFilter && meter) {
+            if (!isReactive || !leadFilter || !meter) {
+                // Skip reactive processing when disabled or components not ready
+            } else {
                 const level = Tone.dbToGain(meter.getValue()); // 0 to 1
                 const boost = level * 2000;
                 // Gently modulate the filter frequency based on master level
-                leadFilter.frequency.value += (boost - (leadFilter.frequency.value - 1000) * 0.1) * 0.05;
+                leadFilter.frequency.rampTo(1000 + boost - (leadFilter.frequency.value - 1000) * 0.1, 0.05);
             }
 
             // Waveform Visualizer
@@ -760,13 +762,13 @@
 
             document.getElementById('lfo-rate-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                if (leadLFO) leadLFO.frequency.value = val;
+                if (leadLFO) leadLFO.frequency.rampTo(val, 0.1);
                 logCode(`# LFO Rate set to ${val}Hz`);
             });
 
             document.getElementById('lfo-depth-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                if (leadLFO) leadLFO.amplitude.value = val;
+                if (leadLFO) leadLFO.amplitude.rampTo(val, 0.1);
                 logCode(`# LFO Depth set to ${val}`);
             });
 
@@ -819,11 +821,11 @@
                 }
                 if (leadReverb) leadReverb.wet.rampTo(0.3, 0.1);
                 if (leadLFO) {
-                    leadLFO.frequency.value = 1;
-                    leadLFO.amplitude.value = 0;
+                    leadLFO.frequency.rampTo(1, 0.1);
+                    leadLFO.amplitude.rampTo(0, 0.1);
                 }
-                if (leadDistortion) leadDistortion.wet.value = 0;
-                if (leadChorus) leadChorus.wet.value = 0;
+                if (leadDistortion) leadDistortion.wet.rampTo(0, 0.1);
+                if (leadChorus) leadChorus.wet.rampTo(0, 0.1);
 
                 // Reset Pattern on Backend
                 if (socket) socket.emit('reset_pattern');
