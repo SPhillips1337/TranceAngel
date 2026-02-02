@@ -35,7 +35,7 @@ h1 {
     font-size: 1.2rem;
 }
 
-#start-stop-btn {
+.main-action-btn {
     background: transparent;
     border: 2px solid #00ffcc;
     color: #00ffcc;
@@ -47,7 +47,7 @@ h1 {
     font-weight: bold;
 }
 
-#start-stop-btn:hover {
+.main-action-btn:hover {
     background: #00ffcc;
     color: #050505;
     box-shadow: 0 0 15px #00ffcc;
@@ -135,7 +135,7 @@ input[type=range] {
     pointer-events: none;
 }
 
-#reset-btn, #hide-ui-btn {
+#reset-btn, #hide-ui-btn, #save-midi-btn, #back-to-main-controls-btn {
     background: transparent;
     border: 1px solid #00ffcc;
     color: #00ffcc;
