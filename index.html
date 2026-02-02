@@ -93,6 +93,12 @@
                     <option value="Random">Random</option>
                 </select>
             </div>
+
+            <div class="control-group">
+                <label>AI Music Generation</label>
+                <input type="text" id="ai-prompt" placeholder="Describe the music you want...">
+                <button id="generate-ai-btn">Generate</button>
+            </div>
             <div class="control-group">
                 <label>Load Pattern (MIDI JSON)</label>
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
@@ -797,6 +803,24 @@
                 const val = e.target.value;
                 socket.emit('set_arp_mode', { mode: val });
                 logCode(`# Arp Mode set to ${val.toUpperCase()}`);
+            });
+
+            document.getElementById('generate-ai-btn').addEventListener('click', async () => {
+                const prompt = document.getElementById('ai-prompt').value;
+                if (!prompt) return;
+                
+                logCode(`# Generating AI music: ${prompt}`);
+                try {
+                    const response = await fetch('/api/generate-music', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt })
+                    });
+                    const params = await response.json();
+                    logCode(`# AI generated: BPM ${params.bpm}, Pattern ${params.melody_pattern}`);
+                } catch (error) {
+                    logCode('# AI generation failed');
+                }
             });
 
             document.getElementById('reset-btn').addEventListener('click', () => {

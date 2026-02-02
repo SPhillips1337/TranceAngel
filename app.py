@@ -2,8 +2,12 @@ import time
 import random
 import json
 import os
-from flask import Flask, render_template, send_from_directory
+import requests
+from dotenv import load_dotenv
+from flask import Flask, render_template, send_from_directory, request
 from flask_socketio import SocketIO, emit
+
+load_dotenv()
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -11,9 +15,20 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Configuration
 BPM = 140
 SIXTEENTH_NOTE_DURATION = (60 / BPM) / 4
+OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 
 SCALE = ["G1", "A1", "Bb1", "C2", "D2", "Eb2", "F2", "G2", "A2", "Bb2", "C3", "D3", "Eb3", "F3", "G3", "A3", "Bb3", "C4", "D4", "Eb4", "F4", "G4", "A4", "Bb4"]
 MELODY_INDICES = [14, 18, 14, 23, 21]
+
+def generate_with_ollama(prompt):
+    try:
+        response = requests.post(f"{OLLAMA_URL}/api/generate", 
+            json={"model": "mrasif/functiongemma-270m-it-GGUF-F16:latest", "prompt": prompt, "stream": False},
+            timeout=15)
+        return response.json().get('response', '')
+    except Exception as e:
+        print(f"Ollama error: {e}")
+        return None
 
 class Sequencer:
     def __init__(self):
@@ -309,5 +324,34 @@ def handle_set_arp_mode(data):
     sequencer.arp_mode = mode
     print(f"Arp mode set to {mode}")
 
+@app.route('/api/test-ollama', methods=['GET'])
+def test_ollama():
+    response = generate_with_ollama("Say 'Ollama is working!' in exactly 3 words.")
+    return {"ollama_response": response, "working": response is not None}
+
+@app.route('/api/generate-music', methods=['POST'])
+def generate_music():
+    prompt = request.json.get('prompt', '')
+    music_prompt = f"Return only valid JSON for {prompt} music: {{\"bpm\": 140, \"scale_notes\": [14,18,14,23,21], \"melody_pattern\": [0,2,1,4,3,1,2,0]}}"
+    
+    response = generate_with_ollama(music_prompt)
+    if response:
+        try:
+            # Extract JSON from response
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start != -1 and end != 0:
+                params = json.loads(response[start:end])
+                return params
+        except:
+            pass
+    
+    # Fallback to random generation
+    return {
+        'bpm': random.randint(130, 145),
+        'scale_notes': [random.randint(10, 20) for _ in range(5)],
+        'melody_pattern': [random.randint(0, 4) for _ in range(8)]
+    }
+
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
