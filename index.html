@@ -115,7 +115,7 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
-        let leadLFO, leadDistortion, leadChorus;
+        let leadLFO, leadDistortion, leadChorus, reactiveSignal;
         let chordSynth, pianoSynth, padSynth, arpSynth;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
@@ -247,7 +247,10 @@
 
             leadLFO = new Tone.LFO("4n", 400, 4000).start();
             leadLFO.connect(leadFilter.frequency);
-            leadLFO.amplitude.value = 0; // Start with no depth
+            leadLFO.amplitude.setValueAtTime(0, Tone.now());
+
+            reactiveSignal = new Tone.Signal(0);
+            reactiveSignal.connect(leadFilter.frequency);
 
             leadDelay = new Tone.PingPongDelay({
                 delayTime: "8n",
@@ -419,13 +422,14 @@
             animationId = requestAnimationFrame(draw);
 
             // Reactive Synthesis Logic
-            if (!isReactive || !leadFilter || !meter) {
-                // Skip reactive processing when disabled or components not ready
-            } else {
+            if (isReactive && reactiveSignal && meter) {
                 const level = Tone.dbToGain(meter.getValue()); // 0 to 1
                 const boost = level * 2000;
-                // Gently modulate the filter frequency based on master level
-                leadFilter.frequency.rampTo(1000 + boost - (leadFilter.frequency.value - 1000) * 0.1, 0.05);
+                // Use linear ramp to the new boost value for smoothness
+                reactiveSignal.linearRampToValueAtTime(boost, Tone.now() + 0.05);
+            } else if (reactiveSignal) {
+                // Return to zero when disabled
+                reactiveSignal.linearRampToValueAtTime(0, Tone.now() + 0.05);
             }
 
             // Waveform Visualizer
@@ -662,15 +666,15 @@
                     // Resonance Safety applied during sweeps too
                     const currentQ = Math.max(1, 15 - (clampedVal / 1000));
 
-                    leadFilter.frequency.rampTo(clampedVal, 0.05);
-                    leadFilter.Q.rampTo(currentQ, 0.05);
+                    leadFilter.frequency.linearRampToValueAtTime(clampedVal, Tone.now() + 0.05);
+                    leadFilter.Q.linearRampToValueAtTime(currentQ, Tone.now() + 0.05);
                     logCode(`control :lead, cutoff: ${clampedVal.toFixed(0)}`);
                 } else if (data.param === 'bass_spread') {
                     if (bassSynth && bassSynth.voices) {
                         // Use rampTime of 0.05s on all voices
                         bassSynth.voices.forEach(voice => {
                             if (voice.oscillator && voice.oscillator.spread) {
-                                voice.oscillator.spread.rampTo(data.value, 0.05);
+                                voice.oscillator.spread.linearRampToValueAtTime(data.value, Tone.now() + 0.05);
                             }
                         });
                     }
@@ -725,7 +729,7 @@
 
             document.getElementById('cutoff-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                if (leadFilter) leadFilter.frequency.rampTo(val, 0.1);
+                if (leadFilter) leadFilter.frequency.linearRampToValueAtTime(val, Tone.now() + 0.1);
             });
 
             document.getElementById('width-slider').addEventListener('input', (e) => {
@@ -733,7 +737,7 @@
                 if (bassSynth && bassSynth.voices) {
                     bassSynth.voices.forEach(voice => {
                         if (voice.oscillator && voice.oscillator.spread) {
-                            voice.oscillator.spread.rampTo(val, 0.1);
+                            voice.oscillator.spread.linearRampToValueAtTime(val, Tone.now() + 0.1);
                         }
                     });
                 }
@@ -741,7 +745,7 @@
 
             document.getElementById('reverb-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value) / 100;
-                if (leadReverb) leadReverb.wet.rampTo(val, 0.1);
+                if (leadReverb) leadReverb.wet.linearRampToValueAtTime(val, Tone.now() + 0.1);
             });
 
             document.getElementById('seed-select').addEventListener('change', (e) => {
@@ -762,25 +766,25 @@
 
             document.getElementById('lfo-rate-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                if (leadLFO) leadLFO.frequency.rampTo(val, 0.1);
+                if (leadLFO) leadLFO.frequency.linearRampToValueAtTime(val, Tone.now() + 0.1);
                 logCode(`# LFO Rate set to ${val}Hz`);
             });
 
             document.getElementById('lfo-depth-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value);
-                if (leadLFO) leadLFO.amplitude.rampTo(val, 0.1);
+                if (leadLFO) leadLFO.amplitude.linearRampToValueAtTime(val, Tone.now() + 0.1);
                 logCode(`# LFO Depth set to ${val}`);
             });
 
             document.getElementById('distortion-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value) / 100;
-                if (leadDistortion) leadDistortion.wet.rampTo(val, 0.1);
+                if (leadDistortion) leadDistortion.wet.linearRampToValueAtTime(val, Tone.now() + 0.1);
                 logCode(`# Lead Distortion set to ${val.toFixed(2)}`);
             });
 
             document.getElementById('chorus-slider').addEventListener('input', (e) => {
                 const val = parseFloat(e.target.value) / 100;
-                if (leadChorus) leadChorus.wet.rampTo(val, 0.1);
+                if (leadChorus) leadChorus.wet.linearRampToValueAtTime(val, Tone.now() + 0.1);
                 logCode(`# Lead Chorus set to ${val.toFixed(2)}`);
             });
 
@@ -811,21 +815,21 @@
                 document.getElementById('seed-select').value = "none";
 
                 // Reset Audio Params
-                if (leadFilter) leadFilter.frequency.rampTo(1000, 0.1);
+                if (leadFilter) leadFilter.frequency.linearRampToValueAtTime(1000, Tone.now() + 0.1);
                 if (bassSynth && bassSynth.voices) {
                     bassSynth.voices.forEach(voice => {
                         if (voice.oscillator && voice.oscillator.spread) {
-                            voice.oscillator.spread.rampTo(20, 0.1);
+                            voice.oscillator.spread.linearRampToValueAtTime(20, Tone.now() + 0.1);
                         }
                     });
                 }
-                if (leadReverb) leadReverb.wet.rampTo(0.3, 0.1);
+                if (leadReverb) leadReverb.wet.linearRampToValueAtTime(0.3, Tone.now() + 0.1);
                 if (leadLFO) {
-                    leadLFO.frequency.rampTo(1, 0.1);
-                    leadLFO.amplitude.rampTo(0, 0.1);
+                    leadLFO.frequency.linearRampToValueAtTime(1, Tone.now() + 0.1);
+                    leadLFO.amplitude.linearRampToValueAtTime(0, Tone.now() + 0.1);
                 }
-                if (leadDistortion) leadDistortion.wet.rampTo(0, 0.1);
-                if (leadChorus) leadChorus.wet.rampTo(0, 0.1);
+                if (leadDistortion) leadDistortion.wet.linearRampToValueAtTime(0, Tone.now() + 0.1);
+                if (leadChorus) leadChorus.wet.linearRampToValueAtTime(0, Tone.now() + 0.1);
 
                 // Reset Pattern on Backend
                 if (socket) socket.emit('reset_pattern');
