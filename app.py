@@ -25,6 +25,7 @@ class Sequencer:
         self.thread = None
         self.pattern = None
         self.mutation = 0.0
+        self.arp_mode = "UpDown"
 
     def note_to_midi(self, name):
         base_map = {'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11}
@@ -201,11 +202,22 @@ class Sequencer:
     def play_arp(self):
         if self.state not in ["Drop", "Groove"]:
             return
-        # Fast 16th note arpeggio
-        arp_pattern = [0, 2, 4, 5, 6, 5, 4, 2] # Indices from G minor scale
-        g_minor_scale = ["G2", "A2", "Bb2", "C3", "D3", "Eb3", "F3"]
-        note_index = arp_pattern[self.sixteenth_count % len(arp_pattern)]
-        note = g_minor_scale[note_index]
+
+        g_minor_scale = ["G2", "A2", "Bb2", "C3", "D3", "Eb3", "F3", "G3"]
+
+        if self.arp_mode == "Random":
+            note = random.choice(g_minor_scale)
+        else:
+            if self.arp_mode == "Up":
+                arp_pattern = [0, 1, 2, 3, 4, 5, 6, 7]
+            elif self.arp_mode == "Down":
+                arp_pattern = [7, 6, 5, 4, 3, 2, 1, 0]
+            else: # UpDown
+                arp_pattern = [0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1]
+
+            note_index = arp_pattern[self.sixteenth_count % len(arp_pattern)]
+            note = g_minor_scale[note_index]
+
         socketio.emit('trigger_arp', {'note': note, 'duration': '16n'})
 
     def play_fx(self):
@@ -289,6 +301,13 @@ def handle_reset_pattern():
     print('Pattern reset')
     sequencer.pattern = None
     sequencer.mutation = 0.0
+    sequencer.arp_mode = "UpDown"
+
+@socketio.on('set_arp_mode')
+def handle_set_arp_mode(data):
+    mode = data.get('mode', 'UpDown')
+    sequencer.arp_mode = mode
+    print(f"Arp mode set to {mode}")
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000)

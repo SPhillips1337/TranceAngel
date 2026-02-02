@@ -65,6 +65,35 @@
                 <input type="range" id="mutation-slider" min="0" max="100" value="0">
             </div>
             <div class="control-group">
+                <label>LFO Rate</label>
+                <input type="range" id="lfo-rate-slider" min="0.1" max="10" step="0.1" value="1">
+            </div>
+            <div class="control-group">
+                <label>LFO Depth</label>
+                <input type="range" id="lfo-depth-slider" min="0" max="1" step="0.01" value="0">
+            </div>
+            <div class="control-group">
+                <label>Distortion</label>
+                <input type="range" id="distortion-slider" min="0" max="100" value="0">
+            </div>
+            <div class="control-group">
+                <label>Chorus</label>
+                <input type="range" id="chorus-slider" min="0" max="100" value="0">
+            </div>
+            <div class="control-group">
+                <label>Reactive Mode</label>
+                <input type="checkbox" id="reactive-checkbox">
+            </div>
+            <div class="control-group">
+                <label>Arp Mode</label>
+                <select id="arp-mode-select">
+                    <option value="UpDown">Up-Down</option>
+                    <option value="Up">Up</option>
+                    <option value="Down">Down</option>
+                    <option value="Random">Random</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label>Load Pattern (MIDI JSON)</label>
                 <input type="file" id="midi-upload" accept=".json, .mid, .midi">
             </div>
@@ -82,9 +111,11 @@
         let socket;
         let isPlaying = false;
         let isInitialized = false;
+        let isReactive = false;
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let leadLFO, leadDistortion, leadChorus;
         let chordSynth, pianoSynth, padSynth, arpSynth;
         let noiseSynth, snareSynth, noiseGate;
         let leadDelay, leadReverb, reverbFilter;
@@ -201,7 +232,22 @@
                 frequency: 1000,
                 type: "lowpass",
                 resonance: 8
-            }).connect(sidechainGain);
+            });
+
+            leadDistortion = new Tone.Distortion(0.5);
+            leadDistortion.wet.value = 0;
+
+            leadChorus = new Tone.Chorus(4, 2.5, 0.5).start();
+            leadChorus.wet.value = 0;
+
+            // Signal Chain: Lead Filter -> Distortion -> Chorus -> Sidechain
+            leadFilter.connect(leadDistortion);
+            leadDistortion.connect(leadChorus);
+            leadChorus.connect(sidechainGain);
+
+            leadLFO = new Tone.LFO("4n", 400, 4000).start();
+            leadLFO.connect(leadFilter.frequency);
+            leadLFO.amplitude.value = 0; // Start with no depth
 
             leadDelay = new Tone.PingPongDelay({
                 delayTime: "8n",
@@ -231,7 +277,8 @@
                 modulationEnvelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 0.5 }
             }).connect(leadFilter);
 
-            leadFilter.connect(leadDelay);
+            // Connect chorus output to parallel FX as well
+            leadChorus.connect(leadDelay);
             leadDelay.connect(leadReverb);
 
             // Chord Synth
@@ -370,6 +417,14 @@
 
         function draw() {
             animationId = requestAnimationFrame(draw);
+
+            // Reactive Synthesis Logic
+            if (isReactive && leadFilter && meter) {
+                const level = Tone.dbToGain(meter.getValue()); // 0 to 1
+                const boost = level * 2000;
+                // Gently modulate the filter frequency based on master level
+                leadFilter.frequency.value += (boost - (leadFilter.frequency.value - 1000) * 0.1) * 0.05;
+            }
 
             // Waveform Visualizer
             const buffer = analyser.getValue();
@@ -703,12 +758,54 @@
                 logCode(`# Mutation set to ${val}%`);
             });
 
+            document.getElementById('lfo-rate-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                if (leadLFO) leadLFO.frequency.value = val;
+                logCode(`# LFO Rate set to ${val}Hz`);
+            });
+
+            document.getElementById('lfo-depth-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                if (leadLFO) leadLFO.amplitude.value = val;
+                logCode(`# LFO Depth set to ${val}`);
+            });
+
+            document.getElementById('distortion-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value) / 100;
+                if (leadDistortion) leadDistortion.wet.rampTo(val, 0.1);
+                logCode(`# Lead Distortion set to ${val.toFixed(2)}`);
+            });
+
+            document.getElementById('chorus-slider').addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value) / 100;
+                if (leadChorus) leadChorus.wet.rampTo(val, 0.1);
+                logCode(`# Lead Chorus set to ${val.toFixed(2)}`);
+            });
+
+            document.getElementById('reactive-checkbox').addEventListener('change', (e) => {
+                isReactive = e.target.checked;
+                logCode(`# Reactive Mode ${isReactive ? 'ENABLED' : 'DISABLED'}`);
+            });
+
+            document.getElementById('arp-mode-select').addEventListener('change', (e) => {
+                const val = e.target.value;
+                socket.emit('set_arp_mode', { mode: val });
+                logCode(`# Arp Mode set to ${val.toUpperCase()}`);
+            });
+
             document.getElementById('reset-btn').addEventListener('click', () => {
                 // Reset Sliders
                 document.getElementById('cutoff-slider').value = 1000;
                 document.getElementById('width-slider').value = 20;
                 document.getElementById('reverb-slider').value = 30;
                 document.getElementById('mutation-slider').value = 0;
+                document.getElementById('lfo-rate-slider').value = 1;
+                document.getElementById('lfo-depth-slider').value = 0;
+                document.getElementById('distortion-slider').value = 0;
+                document.getElementById('chorus-slider').value = 0;
+                document.getElementById('reactive-checkbox').checked = false;
+                isReactive = false;
+                document.getElementById('arp-mode-select').value = "UpDown";
                 document.getElementById('seed-select').value = "none";
 
                 // Reset Audio Params
@@ -721,6 +818,12 @@
                     });
                 }
                 if (leadReverb) leadReverb.wet.rampTo(0.3, 0.1);
+                if (leadLFO) {
+                    leadLFO.frequency.value = 1;
+                    leadLFO.amplitude.value = 0;
+                }
+                if (leadDistortion) leadDistortion.wet.value = 0;
+                if (leadChorus) leadChorus.wet.value = 0;
 
                 // Reset Pattern on Backend
                 if (socket) socket.emit('reset_pattern');
