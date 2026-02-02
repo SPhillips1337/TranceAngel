@@ -53,6 +53,34 @@ h1 {
     box-shadow: 0 0 15px #00ffcc;
 }
 
+#instrument-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 20px 0;
+}
+
+.toggle-btn {
+    background: transparent;
+    border: 1px solid #00ffcc;
+    color: #00ffcc;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+}
+
+.toggle-btn:hover {
+    box-shadow: 0 0 8px #00ffcc;
+}
+
+.toggle-btn.active {
+    background: #00ffcc;
+    color: #050505;
+}
+
 #controls {
     margin-top: 20px;
     display: flex;

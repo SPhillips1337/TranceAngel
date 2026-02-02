@@ -50,6 +50,10 @@ class Sequencer:
         self.play_kick()
         self.play_bass()
         self.play_lead()
+        self.play_chords()
+        self.play_piano()
+        self.play_pads()
+        self.play_arp()
         self.play_fx()
         self.update_params()
 
@@ -112,6 +116,46 @@ class Sequencer:
             # Chaos factor: random detune
             detune = (random.random() - 0.5) * 20
             socketio.emit('trigger_lead', {'note': note, 'duration': '16n', 'detune': detune})
+
+    def play_chords(self):
+        if self.state != "Groove":
+            return
+        # Play a G minor chord progression on the first beat of every 2 bars
+        if self.sixteenth_count == 0 and self.bar_count % 2 == 0:
+            progression = [
+                ["G2", "Bb2", "D3"],  # Gm
+                ["C3", "Eb3", "G3"],  # Cm
+                ["F2", "A2", "C3"],   # F
+                ["D3", "F3", "A3"]    # Dm
+            ]
+            chord = progression[(self.bar_count // 2) % len(progression)]
+            socketio.emit('trigger_chords', {'notes': chord, 'duration': '2n'})
+
+    def play_piano(self):
+        if self.state != "Breakdown":
+            return
+        # Sparse, staccato melody in high register
+        if self.sixteenth_count in [0, 4, 8, 12] and random.random() < 0.4:
+            note = random.choice(SCALE[14:]) # Higher notes
+            socketio.emit('trigger_piano', {'note': note, 'duration': '8n'})
+
+    def play_pads(self):
+        if self.state not in ["Groove", "Breakdown"]:
+            return
+        # Long, ambient textures on the first beat of every 4 bars
+        if self.sixteenth_count == 0 and self.bar_count % 4 == 0:
+            note = random.choice(["G1", "C2", "F1", "D2"]) # Root notes
+            socketio.emit('trigger_pads', {'note': note, 'duration': '1m'})
+
+    def play_arp(self):
+        if self.state not in ["Drop", "Groove"]:
+            return
+        # Fast 16th note arpeggio
+        arp_pattern = [0, 2, 4, 5, 6, 5, 4, 2] # Indices from G minor scale
+        g_minor_scale = ["G2", "A2", "Bb2", "C3", "D3", "Eb3", "F3"]
+        note_index = arp_pattern[self.sixteenth_count % len(arp_pattern)]
+        note = g_minor_scale[note_index]
+        socketio.emit('trigger_arp', {'note': note, 'duration': '16n'})
 
     def play_fx(self):
         if self.state == "Build-up":
