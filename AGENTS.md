@@ -44,9 +44,13 @@ Output: Please write the complete code to run this generative audio stream. Ensu
 
 UI Requirements (Crucial):
 
-Start/Stop Button: Browsers block auto-playing audio. Create a simple, styled button in the center of the screen to Initialize Tone.start() and toggle the transport.
+Start/Stop Button: Browsers block auto-playing audio. A simple, prominently styled button initializes Tone.start() and toggles the transport.
 
-Visualizer: Include a <canvas> element that renders a real-time waveform or frequency analysis (Oscilloscope style) of the Master output, similar to the video's aesthetic.
+Mixer UI: A dedicated 'MIXER' button toggles the display of a separate mixer panel, featuring individual volume faders for each instrument (kick, bass, lead, chords, piano, pads, arp).
+
+Action Button Styling: Prominent action buttons (START/STOP, MIXER, Save MIDI) share a consistent, larger green-and-black styling. Secondary action buttons (RESET, HIDE UI, BACK) have a smaller, consistent green-and-black styling.
+
+Visualizer: Includes a <canvas> element that renders a real-time waveform or frequency analysis (Oscilloscope style) of the Master output, similar to the video's aesthetic.
 
 Technical & Musical Requirements:
 
@@ -60,11 +64,13 @@ Melody Algorithm: Implement the specific "Switch Angel" motif: Use scale degrees
 
 Synthesizer Design (Tone.js):
 
-Lead Synth: Use Tone.Synth or Tone.MonoSynth with a Sawtooth oscillator. Route it through a Low-Pass Filter. Map an LFO or automation to the Filter Cutoff to create slow, evolving "Acid" sweeps.
+Lead Synth: Uses Tone.PolySynth with a Fatsawtooth oscillator for a rich, wide sound. Features an aggressive Low-Pass Filter with reduced Q and filter envelope octaves, and an LFO for controlled sweeps (range adjusted for mellower sound). Volume is explicitly set lower to prevent overpowering other elements.
 
 Bassline (Super Saw): Use Tone.PolySynth with Tone.FatOscillator (type: "fatsawtooth"). Set spread to 20-30 and count to 3 for that wide, detuned trance sound. It should play a simple off-beat rhythm or follow the root notes.
 
 Kick Drum: Use Tone.MembraneSynth to create a punchy "Trance Kick" playing 4/4 (four-on-the-floor).
+
+Arp Synth: Uses Tone.FMSynth with a square oscillator, now routed through its own low-pass filter to prevent harsh high frequencies. The Arp Synth is correctly triggered and controlled.
 
 Effects & Mixing:
 
