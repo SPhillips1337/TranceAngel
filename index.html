@@ -570,38 +570,57 @@
             }
         }
 
+        // Timing management to prevent conflicts
+        let lastTriggerTime = 0;
+        const minInterval = 0.001; // 1ms minimum between triggers
+
+        function getSafeTime() {
+            const now = Tone.now();
+            const proposedTime = now + Math.random() * 0.01 + 0.2; // Increased lookahead for network latency
+            if (proposedTime <= lastTriggerTime + minInterval) {
+                lastTriggerTime = lastTriggerTime + minInterval;
+                return lastTriggerTime;
+            }
+            lastTriggerTime = proposedTime;
+            return proposedTime;
+        }
+
         function initSocket() {
-            socket = io();
+            socket = io({
+                transports: ['websocket'],
+                upgrade: false,
+                rememberUpgrade: false
+            });
 
             socket.on('trigger_sidechain', () => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                triggerSidechain(now + lookAhead);
+                
+                
+                triggerSidechain(getSafeTime());
                 logCode("with_fx :sidechain do");
             });
 
             socket.on('trigger_kick', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1; // 100ms look-ahead to handle jitter
-                const time = now + lookAhead;
+                
+                 // Add jitter to prevent timing conflicts
+                const time = getSafeTime();
                 kickSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 9); // Channel 10 (drums)
                 logCode(`  sample :bd_haus, rate: 1, amp: 1`);
             });
 
             socket.on('trigger_bass', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                const time = now + lookAhead;
+                
+                
+                const time = getSafeTime();
                 bassSynth.triggerAttackRelease(data.note, data.duration, time);
                 sendMIDINote(data.note, data.duration, time, 1); // Channel 2
                 logCode(`  play :${data.note.replace('1', '')}1, release: 0.1, synth: :prophet`);
             });
 
             socket.on('trigger_lead', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                const time = now + lookAhead;
+                
+                
+                const time = getSafeTime();
 
                 // Harmonic Tracking (Key Follow): Base Cutoff = Note Frequency * 3
                 const freq = Tone.Frequency(data.note).toFrequency();
@@ -620,47 +639,47 @@
             });
 
             socket.on('trigger_riser', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                noiseSynth.triggerAttack("C4", now + lookAhead);
+                
+                
+                noiseSynth.triggerAttack("C4", getSafeTime());
                 // Release after duration in bars
                 const durationSeconds = (60 / 140) * 4 * data.duration;
-                noiseSynth.triggerRelease("C4", now + lookAhead + durationSeconds);
+                noiseSynth.triggerRelease("C4", getSafeTime() + durationSeconds);
                 logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
             socket.on('trigger_snare', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                snareSynth.triggerAttackRelease("C4", data.duration, now + lookAhead);
+                
+                
+                snareSynth.triggerAttackRelease("C4", data.duration, getSafeTime());
                 logCode(`  sample :sn_dnb, amp: 0.5`);
             });
 
             socket.on('trigger_chords', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                chordSynth.triggerAttackRelease(data.notes, data.duration, now + lookAhead);
+                
+                
+                chordSynth.triggerAttackRelease(data.notes, data.duration, getSafeTime());
                 logCode(`  play_chord [:${data.notes.join(', :')}], release: 1`);
             });
 
             socket.on('trigger_piano', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                pianoSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                
+                
+                pianoSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
                 logCode(`  play :${data.note}, synth: :piano`);
             });
 
             socket.on('trigger_pads', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                padSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                
+                
+                padSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
                 logCode(`  play :${data.note}, release: 4, synth: :hollow`);
             });
 
             socket.on('trigger_arp', (data) => {
-                const now = Tone.now();
-                const lookAhead = 0.1;
-                arpSynth.triggerAttackRelease(data.note, data.duration, now + lookAhead);
+                
+                
+                arpSynth.triggerAttackRelease(data.note, data.duration, getSafeTime());
                 logCode(`  play :${data.note}, synth: :arp`);
             });
 
@@ -902,7 +921,13 @@
 
         document.getElementById("start-stop-btn").addEventListener("click", async () => {
             if (!isPlaying) {
-                await Tone.start();
+                try {
+                    await Tone.start();
+                    console.log('Audio context started successfully');
+                } catch (error) {
+                    console.error('Failed to start audio context:', error);
+                    return;
+                }
                 if (!isInitialized) {
                     setupAudio();
                     await initMIDI();
