@@ -143,8 +143,10 @@ class Sequencer:
     def play_bass(self):
         if self.state in ["Breakdown", "Build-up"]:
             return
-        # Constant 16th notes for the frontend Trance Gate to mask
-        socketio.emit('trigger_bass', {'note': SCALE[0], 'duration': '16n'})
+        # Emit constant 16th notes for the frontend Trance Gate to mask
+        # Only emit when actually needed to avoid overwhelming the socket
+        if self.sixteenth_count % 1 == 0:  # Every 16th note, but with explicit condition
+            socketio.emit('trigger_bass', {'note': SCALE[0], 'duration': '16n'})
 
     def play_lead(self):
         # Use MIDI pattern if available

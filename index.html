@@ -171,7 +171,9 @@
             next() {
                 const index = this.pattern[this.step % this.pattern.length];
                 this.step++;
-                return this.scale[index];
+                // Ensure index is within bounds of the scale array
+                const safeIndex = Math.min(index, this.scale.length - 1);
+                return this.scale[safeIndex];
             }
         }
 
@@ -187,7 +189,10 @@
                 logCode(`# Trance Gate Evolved: ${this.mask.slice(0, 8).join('')}...`);
             }
             get(index) {
-                return this.mask[index % 16];
+                if (!this.mask || this.mask.length === 0) {
+                    return 0; // Safe fallback
+                }
+                return this.mask[index % this.mask.length];
             }
         }
 
@@ -1016,18 +1021,20 @@
 
             melodyLoop = new Tone.Loop((time) => {
                 // 1. Trance Gate Logic (Applied to Bass)
-                const gateValue = tranceGate.get(sixteenthStep);
-                bassGate.gain.rampTo(gateValue, 0.01, time);
+                if (tranceGate && bassGate) {
+                    const gateValue = tranceGate.get(sixteenthStep);
+                    bassGate.gain.rampTo(gateValue, 0.01, time);
 
-                // Evolve Gate every 4 bars
-                if (sixteenthStep % 64 === 0 && sixteenthStep > 0) {
-                    tranceGate.evolve();
+                    // Evolve Gate every 4 bars
+                    if (sixteenthStep % 64 === 0 && sixteenthStep > 0) {
+                        tranceGate.evolve();
+                    }
                 }
 
                 // 2. Melody Cycle Logic (Strudel style)
                 // Trigger every 8th note (every 2 sixteenths)
                 if (sixteenthStep % 2 === 0) {
-                    if (enabledInstruments.lead) {
+                    if (enabledInstruments.lead && melodyCycle && leadSynth) {
                         const note = melodyCycle.next();
                         const duration = "16n";
                         leadSynth.triggerAttackRelease(note, duration, time);
