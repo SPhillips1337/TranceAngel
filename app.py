@@ -41,6 +41,8 @@ class Sequencer:
         self.pattern = None
         self.mutation = 0.0
         self.arp_mode = "UpDown"
+        self.bpm = 140 # Initialize BPM here
+        self.sixteenth_note_duration = (60 / self.bpm) / 4 # Calculate based on self.bpm
 
     def note_to_midi(self, name):
         base_map = {'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11}
@@ -97,7 +99,7 @@ class Sequencer:
             current_time = time.time()
             if current_time >= next_tick:
                 self.tick()
-                next_tick += SIXTEENTH_NOTE_DURATION
+                next_tick += self.sixteenth_note_duration
             else:
                 socketio.sleep(0.005)
 
@@ -153,7 +155,7 @@ class Sequencer:
             current_beats_in_bar = self.sixteenth_count * 0.25
 
             for note_data in track.get('notes', []):
-                note_time_beats = note_data.get('time', 0) * (BPM / 60)
+                note_time_beats = note_data.get('time', 0) * (self.bpm / 60)
                 # Loop the pattern time within 4 beats
                 pattern_time = note_time_beats % 4
 
@@ -323,6 +325,14 @@ def handle_set_arp_mode(data):
     mode = data.get('mode', 'UpDown')
     sequencer.arp_mode = mode
     print(f"Arp mode set to {mode}")
+
+@socketio.on('set_bpm')
+def handle_set_bpm(data):
+    new_bpm = data.get('bpm')
+    if new_bpm is not None:
+        sequencer.bpm = new_bpm
+        sequencer.sixteenth_note_duration = (60 / sequencer.bpm) / 4
+        print(f"BPM updated to {sequencer.bpm}")
 
 @app.route('/api/test-ollama', methods=['GET'])
 def test_ollama():

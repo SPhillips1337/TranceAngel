@@ -94,6 +94,10 @@
                 <input type="checkbox" id="reactive-checkbox">
             </div>
             <div class="control-group">
+                <label>Background Loop</label>
+                <input type="checkbox" id="background-loop-checkbox" checked>
+            </div>
+            <div class="control-group">
                 <label>Arp Mode</label>
                 <select id="arp-mode-select">
                     <option value="UpDown">Up-Down</option>
@@ -625,11 +629,7 @@
         }
 
         function initSocket() {
-            socket = io({
-                transports: ['websocket'],
-                upgrade: false,
-                rememberUpgrade: false
-            });
+            socket = io();
 
             socket.on('trigger_sidechain', () => {
                 
@@ -679,10 +679,15 @@
             socket.on('trigger_riser', (data) => {
                 
                 const time = Tone.now() + Math.random() * 0.01 + 0.16;
-                if (noiseSynth) noiseSynth.triggerAttack("C1", time);
+                // Ensure time is a number, though it should be already
+                const scheduleTime = typeof time === 'number' ? time : Tone.now();
                 // Release after duration in bars
-                const durationSeconds = (60 / 140) * 4 * data.duration;
-                if (noiseSynth) noiseSynth.triggerRelease("C1", Tone.now() + 0.1 + durationSeconds);
+                const durationSeconds = (60 / Tone.Transport.bpm.value) * 4 * data.duration;
+                // Ensure durationSeconds is a finite number
+                const finalDuration = Number.isFinite(durationSeconds) ? durationSeconds : 0.1; // Default to 0.1 if not finite
+                if (noiseSynth) {
+                    noiseSynth.triggerAttackRelease(finalDuration, scheduleTime);
+                }
                 logCode(`  sample :ambi_whitenoise, sustain: ${data.duration * 4}`);
             });
 
@@ -711,7 +716,7 @@
             socket.on('trigger_pads', (data) => {
                 
                 
-                padSynth; safeTrigger(pianoSynth, data.note, data.duration);
+                safeTrigger(padSynth, data.note, data.duration);
                 logCode(`  play :${data.note}, release: 4, synth: :hollow`);
             });
 
@@ -760,8 +765,8 @@
                     if (noiseSynth) noiseSynth.volume.rampTo(-Infinity, 0.05);
                     if (snareSynth) snareSynth.volume.rampTo(-Infinity, 0.05);
                 } else {
-                    if (noiseSynth) noiseSynth.volume.rampTo(0, 0.05);
-                    if (snareSynth) snareSynth.volume.rampTo(0, 0.05);
+                    if (noiseSynth) noiseSynth.volume.rampTo(-20, 0.05);
+                    if (snareSynth) snareSynth.volume.rampTo(-6, 0.05);
                 }
                 logCode(`# Transition to ${data.state.toUpperCase()}`);
             });
@@ -775,6 +780,7 @@
                 if (topLoopPlayer) {
                     topLoopPlayer.frequency.value = 55 * (bpm / 140);
                 }
+                socket.emit('set_bpm', { bpm: bpm }); // Notify backend of BPM change
                 logCode(`# BPM set to ${bpm}`);
             });
 
@@ -883,6 +889,17 @@
             document.getElementById('reactive-checkbox').addEventListener('change', (e) => {
                 isReactive = e.target.checked;
                 logCode(`# Reactive Mode ${isReactive ? 'ENABLED' : 'DISABLED'}`);
+            });
+
+            const backgroundLoopCheckbox = document.getElementById('background-loop-checkbox');
+            if (topLoopPlayer) {
+                topLoopPlayer.volume.mute = !backgroundLoopCheckbox.checked;
+            }
+            backgroundLoopCheckbox.addEventListener('change', (e) => {
+                if (topLoopPlayer) {
+                    topLoopPlayer.volume.mute = !e.target.checked;
+                }
+                logCode(`# Background Loop ${e.target.checked ? 'ENABLED' : 'DISABLED'}`);
             });
 
             document.getElementById('arp-mode-select').addEventListener('change', (e) => {
@@ -1075,6 +1092,19 @@
                 if (topLoopPlayer) topLoopPlayer.stop();
                 if (melodySequence) melodySequence.stop();
                 Tone.Transport.stop();
+                // Add explicit silencing for all synths
+                if (kickSynth) kickSynth.volume.mute = true;
+                if (bassSynth) bassSynth.volume.mute = true;
+                if (leadSynth) leadSynth.volume.mute = true;
+                if (chordSynth) chordSynth.volume.mute = true;
+                if (pianoSynth) pianoSynth.volume.mute = true;
+                if (padSynth) padSynth.volume.mute = true;
+                if (arpSynth) arpSynth.volume.mute = true;
+                if (noiseSynth) noiseSynth.volume.mute = true;
+                if (snareSynth) snareSynth.volume.mute = true;
+                // Also reset effects wet to 0 to cut tails
+                if (leadDelay) leadDelay.wet.value = 0;
+                if (leadReverb) leadReverb.wet.value = 0;
                 document.getElementById("start-stop-btn").innerText = "START";
                 document.getElementById("state-display").innerText = "State: Stopped";
             }
