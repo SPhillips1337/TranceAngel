@@ -1,4 +1,4 @@
-# TranceAngel 🎵
+# TranceGen 🎵
 
 A real-time generative trance music creator that combines Python sequencing logic with Tone.js audio synthesis. Inspired by the "Switch Angel" live coding method, this application creates endless, evolving trance music with AI-powered parameter generation.
 
