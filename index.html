@@ -161,6 +161,36 @@
     <canvas id="histogram"></canvas>
 
     <script>
+        // Strudel-style Pattern Logic
+        class PatternCycle {
+            constructor(pattern, scale) {
+                this.pattern = pattern; // e.g. [14, 18, 14, 23, 21]
+                this.scale = scale;
+                this.step = 0;
+            }
+            next() {
+                const index = this.pattern[this.step % this.pattern.length];
+                this.step++;
+                return this.scale[index];
+            }
+        }
+
+        // Switch Angel style Trance Gate
+        class TranceGate {
+            constructor() {
+                this.mask = [1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1];
+            }
+            evolve() {
+                // Randomly flip bits (0 to 1) every 4 bars
+                const idx = Math.floor(Math.random() * 16);
+                this.mask[idx] = 1 - this.mask[idx];
+                logCode(`# Trance Gate Evolved: ${this.mask.slice(0, 8).join('')}...`);
+            }
+            get(index) {
+                return this.mask[index % 16];
+            }
+        }
+
         // Cache bust v2.0 - Fixed Sampler issues
         let socket;
         let isPlaying = false;
@@ -170,6 +200,7 @@
 
         // Audio components
         let kickSynth, bassSynth, leadSynth, leadFilter, sidechainGain;
+        let bassGate, tranceGate, melodyCycle;
         let leadLFO, leadDistortion, leadChorus, reactiveSignal;
         let chordSynth, pianoSynth, padSynth, arpSynth;
         let noiseSynth, snareSynth, noiseGate, topLoopPlayer;
@@ -177,7 +208,8 @@
 
         // MIDI Recording
         let recordedNotes = [];
-        let melodySequence;
+        let melodyLoop;
+        const G_MINOR_SCALE = ["G1", "A1", "Bb1", "C2", "D2", "Eb2", "F2", "G2", "A2", "Bb2", "C3", "D3", "Eb3", "F3", "G3", "A3", "Bb3", "C4", "D4", "Eb4", "F4", "G4", "A4", "Bb4"];
         let analyser, fftAnalyser, canvas, ctx, animationId, meter;
         let histCanvas, histCtx;
 
@@ -256,6 +288,10 @@
             // Sidechain effect node
             sidechainGain = new Tone.Gain(1).connect(masterComp);
 
+            // Trance Gate (Switch Angel style)
+            tranceGate = new TranceGate();
+            bassGate = new Tone.Gain(1).connect(sidechainGain);
+
             // Noise Gate to prevent "Zombie" hiss
             noiseGate = new Tone.Gate(-50).connect(masterComp);
 
@@ -278,7 +314,7 @@
                 envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.4 },
                 filter: { frequency: 350, type: "lowpass", rolloff: -24 },
                 filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.4, baseFrequency: 200, octaves: 2 }
-            }).connect(sidechainGain);
+            }).connect(bassGate); // Routed through Trance Gate
             bassSynth.volume.value = -6;
 
             // Lead Synth (Hiss-Free FMSynth)
@@ -974,22 +1010,41 @@
                 }
             });
 
-                // Switch Angel Motif Sequence
-                const angelMotif = ["G3", "D4", "G3", "Bb4", "G4"]; // 0, 4, 0, 9, 7 intervals (approx)
-                melodySequence = new Tone.Sequence((time, note) => {
-                    const duration = "16n";
-                    leadSynth.triggerAttackRelease(note, duration, time);
+            // Strudel-style Cycle & Trance Gate Loop
+            melodyCycle = new PatternCycle([14, 18, 14, 23, 21], G_MINOR_SCALE);
+            let sixteenthStep = 0;
 
-                    // Record note for MIDI saving
-                    recordedNotes.push({
-                        note: note,
-                        time: Tone.Transport.seconds,
-                        duration: Tone.Time(duration).toSeconds()
-                    });
-                    if (recordedNotes.length > 100) recordedNotes.shift(); // Keep last 100
+            melodyLoop = new Tone.Loop((time) => {
+                // 1. Trance Gate Logic (Applied to Bass)
+                const gateValue = tranceGate.get(sixteenthStep);
+                bassGate.gain.rampTo(gateValue, 0.01, time);
 
-                    logCode(`  play :${note} # Switch Angel`);
-                }, angelMotif, "8n");
+                // Evolve Gate every 4 bars
+                if (sixteenthStep % 64 === 0 && sixteenthStep > 0) {
+                    tranceGate.evolve();
+                }
+
+                // 2. Melody Cycle Logic (Strudel style)
+                // Trigger every 8th note (every 2 sixteenths)
+                if (sixteenthStep % 2 === 0) {
+                    if (enabledInstruments.lead) {
+                        const note = melodyCycle.next();
+                        const duration = "16n";
+                        leadSynth.triggerAttackRelease(note, duration, time);
+
+                        recordedNotes.push({
+                            note: note,
+                            time: Tone.Transport.seconds,
+                            duration: Tone.Time(duration).toSeconds()
+                        });
+                        if (recordedNotes.length > 100) recordedNotes.shift();
+
+                        logCode(`  play :${note} # Cycle Object`);
+                    }
+                }
+
+                sixteenthStep++;
+            }, "16n");
 
             // Instrument Toggles
             document.querySelectorAll('.toggle-btn').forEach(btn => {
@@ -1083,14 +1138,14 @@
                 socket.emit('start_music');
                 isPlaying = true;
                 if (topLoopPlayer) topLoopPlayer.start();
-                if (melodySequence) melodySequence.start(0);
+                if (melodyLoop) melodyLoop.start(0);
                 Tone.Transport.start();
                 document.getElementById("start-stop-btn").innerText = "STOP";
             } else {
                 if (socket) socket.emit('stop_music');
                 isPlaying = false;
                 if (topLoopPlayer) topLoopPlayer.stop();
-                if (melodySequence) melodySequence.stop();
+                if (melodyLoop) melodyLoop.stop();
                 Tone.Transport.stop();
                 // Add explicit silencing for all synths
                 if (kickSynth) kickSynth.volume.mute = true;
